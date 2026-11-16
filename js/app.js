@@ -152,7 +152,7 @@
         if (!S.myPower || !mp.includes(S.myPower)) S.myPower = mp[0] || null;
         if (prevKey && g.state && prevKey !== E.phaseKey(g.state)) { S.sel = null; S.view = null; flash('Nové kolo: ' + E.phaseName(g.state)); if (g.state.type !== 'M' && E.actingPowers(g.state).some((p) => mp.includes(p))) { if (S.L.float !== 'orders') S.tab = 'orders'; if (S.L.mode === 'map') S.L.mode = 'split'; } }
       }
-      render(); maybeResolve(false); aiTick();
+      render(); maybeResolve(false); aiTick(); maybeAutoStart(g);
     }, () => { S.game = null; render(); }));
     S.unsub.push(S.B.watchSub(id, 'orders', (docs) => { S.orders = {}; for (const d of docs) S.orders[d.id] = d; render(); maybeResolve(false); }));
     S.unsub.push(S.B.watchSub(id, 'history', (docs) => {
@@ -1400,6 +1400,8 @@
         <input id="ng-name" maxlength="40" placeholder="např. Páteční Evropa" value="">
         <label for="ng-mode">Kdo hraje</label>
         <select id="ng-mode"><option value="table">pozvu přátele, země se vylosují při startu</option><option value="now">hraju hned sám, země se vylosuje teď</option></select>
+        <label for="ng-need">Kolik lidí bude hrát (hra začne sama, až přisedne poslední)</label>
+        <select id="ng-need">${[2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}"${n === 7 ? ' selected' : ''}>${n} hráči</option>`).join('').replace(/7 hráči/, '7 hráčů').replace(/5 hráči/, '5 hráčů').replace(/6 hráči/, '6 hráčů')}<option value="0">spustím ručně</option></select>
         <label for="ng-fill">Volné velmoci převezmou</label>
         <select id="ng-fill">${S.B.kind !== 'db' ? '<option value="bot">jednoduší boti: jen táhnou, nemluví</option><option value="ai" disabled>AI diplomaté – jen ve verzi v Claude</option>' : '<option value="ai">AI diplomaté: vyjednávají, blafují, zrazují</option><option value="bot">jednoduší boti: jen táhnou, nemluví</option>'}</select>
         <label for="ng-dl">Odpočet času</label>
@@ -1867,23 +1869,40 @@
   }
 
   // ---------- table (game lobby) + draw reveal
+  // spuštění hry: ručně zakladatelem, nebo samo, když u stolu sedí plný počet hráčů (g.need)
+  let autoStarting = false;
+  async function startGame(id, auto) {
+    try {
+      const lease = await S.B.acquire(id); if (lease && lease.acquired === false) { if (!auto) flash('Zkus to za chvíli.'); return; }
+      const fresh = await S.B.getGame(id); if (!fresh || fresh.status !== 'lobby') return;
+      if (auto && !(fresh.need > 0 && Object.keys(fresh.players || {}).length >= fresh.need)) return;
+      Object.assign(fresh, drawPowers(fresh), { status: 'play', phaseAt: Date.now(), drawAt: Date.now(), state: E.initialState() });
+      await S.B.setGame(id, fresh);
+    } catch (e) { if (!auto) flash('Hru se nepodařilo spustit.'); }
+  }
+  function maybeAutoStart(g) {
+    if (!g || g.status !== 'lobby' || !(g.need > 0) || autoStarting || !S.canWrite) return;
+    if (Object.keys(g.players || {}).length < g.need) return;
+    autoStarting = true; startGame(g.id, true).finally(() => { autoStarting = false; });
+  }
   function cardBack(i) { return `<div class="cback" style="--i:${i}"><span>V</span></div>`; }
   function renderSeats(root, g) {
     const creator = g.createdBy === S.B.uid;
     const players = Object.keys(g.players || {});
     const seated = !!(g.players && g.players[S.B.uid]);
+    const need = g.need > 0 ? g.need : 0; const cap = need || 7;
     root.innerHTML = header(`<span class="gtitle">${esc(g.name || '')}</span><span class="phase">Čeká se na los</span>`) + `
       <main class="seatsv">
-        <div class="seathead"><h1>${esc(g.name || 'Nová hra')}</h1><p>Přisedni ke stolu a pošli přátelům odkaz na tuhle stránku. Až budou všichni, zakladatel zamíchá karty a každému se vylosuje jedna velmoc. Zbylé převezmou ${g.fill === 'bot' ? 'jednoduší boti' : 'AI diplomaté, kteří vyjednávají, blafují a zrazují jako lidé'}.</p></div>
+        <div class="seathead"><h1>${esc(g.name || 'Nová hra')}</h1><p>Přisedni ke stolu a pošli přátelům odkaz na tuhle stránku. ${need ? `Jakmile přisedne ${need}. hráč, karty se samy zamíchají, každému se vylosuje jedna velmoc a začne odpočet prvního kola.` : 'Až budou všichni, zakladatel zamíchá karty a každému se vylosuje jedna velmoc.'} Zbylé převezmou ${g.fill === 'bot' ? 'jednoduší boti' : 'AI diplomaté, kteří vyjednávají, blafují a zrazují jako lidé'}.</p></div>
         <div class="deck" aria-hidden="true">${PW.map((_, i) => cardBack(i)).join('')}</div>
-        <h2>U stolu (${players.length} z 7)</h2>
+        <h2>U stolu (${players.length} z ${cap})${need && players.length < need ? ` <span class="muted small">čeká se ještě na ${need - players.length}</span>` : ''}</h2>
         <ul class="plist">${players.map((u) => `<li><span class="pdot"></span>${esc(nameOf(u))}${u === g.createdBy ? ' <span class="muted small">zakladatel</span>' : ''}</li>`).join('') || '<li class="muted">Zatím nikdo.</li>'}</ul>
         <div class="seatfoot">
-          ${seated ? (creator ? '' : `<button class="btn" data-act="leave">Odejít od stolu</button>`) : `<button class="btn primary" data-act="join" ${S.canWrite && players.length < 7 ? '' : 'disabled'}>Přisednout ke stolu</button>`}
-          ${creator ? `<button class="btn primary big" data-act="start" ${players.length ? '' : 'disabled'}>Zamíchat a losovat země</button>
+          ${seated ? (creator ? '' : `<button class="btn" data-act="leave">Odejít od stolu</button>`) : `<button class="btn primary" data-act="join" ${S.canWrite && players.length < cap ? '' : 'disabled'}>Přisednout ke stolu</button>`}
+          ${creator ? `<button class="btn ${need ? '' : 'primary big'}" data-act="start" ${players.length ? '' : 'disabled'}>${need ? `Začít hned (${players.length} ${players.length === 1 ? 'hráč' : players.length < 5 ? 'hráči' : 'hráčů'})` : 'Zamíchat a losovat země'}</button>
             <label class="inl" for="fill-sel">Volná místa:</label><select id="fill-sel" class="inlsel"><option value="ai"${g.fill !== 'bot' ? ' selected' : ''}${S.B.kind !== 'db' ? ' disabled' : ''}>AI diplomaté${S.B.kind !== 'db' ? ' (jen v Claude)' : ''}</option><option value="bot"${g.fill === 'bot' ? ' selected' : ''}>jednoduší boti</option></select>
             <label class="inl" for="tempo-sel">Čas:</label><select id="tempo-sel" class="inlsel">${Object.entries(TEMPO).map(([k, t]) => `<option value="${k}"${(g.tempo || 'none') === k ? ' selected' : ''}>${esc(t.l)}</option>`).join('')}</select>
-            <button class="btn sm ghost" data-act="delgame">Smazat hru</button>` : `<span class="muted">Losovat bude zakladatel hry. Čas: ${esc(TEMPO[g.tempo || 'none'].l)}.</span>`}
+            <button class="btn sm ghost" data-act="delgame">Smazat hru</button>` : `<span class="muted">${need ? 'Hra začne sama, až budou všichni u stolu.' : 'Losovat bude zakladatel hry.'} Čas: ${esc(TEMPO[g.tempo || 'none'].l)}.</span>`}
         </div>
         ${S.B.kind === 'db' ? `<p class="muted small">Spoluhráči potřebují k téhle stránce přístup s právem zápisu (Editor, nebo Contributor ve tvé organizaci).</p>` : ''}
       </main>`;
@@ -1936,9 +1955,9 @@
   async function createGame(ev) {
     ev.preventDefault();
     const name = ($('#ng-name').value || '').trim() || 'Partie ' + new Date().toLocaleDateString('cs-CZ');
-    const mode = $('#ng-mode').value; const fill = $('#ng-fill').value; const tempo = $('#ng-dl').value;
+    const mode = $('#ng-mode').value; const fill = $('#ng-fill').value; const tempo = $('#ng-dl').value; const need = +(($('#ng-need') || {}).value || 0);
     const seats = {}; for (const p of PW) seats[p] = '';
-    const data = { name, created: Date.now(), createdBy: S.B.uid, status: 'lobby', players: { [S.B.uid]: Date.now() }, fill, seats, bots: {}, ai: {}, tempo, deadline: 0, paused: null, phaseAt: 0, seq: 0, state: E.initialState() };
+    const data = { name, created: Date.now(), createdBy: S.B.uid, status: 'lobby', players: { [S.B.uid]: Date.now() }, need, fill, seats, bots: {}, ai: {}, tempo, deadline: 0, paused: null, phaseAt: 0, seq: 0, state: E.initialState() };
     if (mode === 'now') { Object.assign(data, drawPowers(data), { status: 'play', phaseAt: Date.now(), drawAt: Date.now() }); }
     try { const id = await S.B.create(data); if (fill === 'ai') lsSet('velmoci-aihost-' + id, true); openGame(id); } catch (e) { flash('Hru se nepodařilo založit. Máš k této stránce právo zápisu?'); }
   }
@@ -2037,15 +2056,7 @@
         const pl = Object.assign({}, fresh.players); delete pl[S.B.uid];
         await S.B.setGame(S.gid, Object.assign(fresh, { players: pl })).catch(() => flash('Nepovedlo se.')); break;
       }
-      case 'start': {
-        try {
-          const lease = await S.B.acquire(S.gid); if (lease && lease.acquired === false) { flash('Zkus to za chvíli.'); break; }
-          const fresh = await S.B.getGame(S.gid); if (!fresh || fresh.status !== 'lobby') break;
-          Object.assign(fresh, drawPowers(fresh), { status: 'play', phaseAt: Date.now(), drawAt: Date.now(), state: E.initialState() });
-          await S.B.setGame(S.gid, fresh);
-        } catch (e) { flash('Hru se nepodařilo spustit.'); }
-        break;
-      }
+      case 'start': await startGame(S.gid, false); break;
       case 'rv-go': {
         const cb = $('#rv-ai'); if (cb) lsSet('velmoci-aihost-' + S.gid, cb.checked);
         lsSet('velmoci-rev-' + S.gid, g.drawAt); render(); aiTick(); break;
