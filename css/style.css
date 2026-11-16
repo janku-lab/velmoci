@@ -559,3 +559,12 @@ table.keys kbd { font-size: 13px; padding: 3px 6px; }
 .rpcap .rpmv { white-space: nowrap; margin-right: 8px; }
 .rpstamp { transform: rotate(-3deg); }
 
+
+/* vstupní brána s heslem (js/gate.js) */
+.gate { min-height: 100dvh; display: grid; place-items: center; padding: 16px; box-sizing: border-box; background: #1c140e url(../hero.jpg) center 62% / cover no-repeat; }
+.gate-box { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 8px; padding: 26px 24px; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5); box-sizing: border-box; }
+.gate-k { font-family: var(--f-display); font-size: 34px; letter-spacing: .1em; text-align: center; margin-bottom: 8px; }
+.gate-k span { color: var(--accent); }
+.gate-box label { font-size: 14px; color: var(--ink-2); letter-spacing: .03em; }
+.gate-box .btn { margin-top: 8px; }
+.gate-err { margin: 4px 0 0; color: #c0281c; text-align: center; }
