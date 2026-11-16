@@ -3,7 +3,9 @@
 (function () {
   var KEY = 'velmoci-gate';
   var HASH = 'c52f9ad00420407c9f45d2aa16682fa3616c140ac97f323bc60ef0f60e996099'; // SHA-256 hesla
-  var SCRIPTS = ['js/data.js', 'js/engine.js', 'js/app.js'];
+  var FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
+  var SCRIPTS = [FB + 'firebase-app-compat.js', FB + 'firebase-auth-compat.js', FB + 'firebase-firestore-compat.js',
+    'js/fb.js', 'js/data.js', 'js/engine.js', 'js/app.js'];
 
   function loadGame() {
     var i = 0;
@@ -12,6 +14,7 @@
       var s = document.createElement('script');
       s.src = SCRIPTS[i++];
       s.onload = next;
+      s.onerror = next; // bez Firebase (offline) hra poběží lokálně
       document.body.appendChild(s);
     })();
   }

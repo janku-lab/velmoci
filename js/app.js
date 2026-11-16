@@ -123,6 +123,9 @@
     if (db && uid) {
       S.B = dbBackend(db, uid); S.user = user;
       try { const c = await user.can('data.write'); if (c === false) S.canWrite = false; } catch (e) { /* ignore */ }
+    } else if (window.VFB) {
+      try { const r = await window.VFB.connect(); S.B = r.backend; S.user = r.user; S.names[r.backend.uid] = r.name; }
+      catch (e) { console.warn('Online režim nedostupný', e); S.B = localBackend(); }
     } else S.B = localBackend();
     S.loadTimer = setTimeout(() => { if (!S.games) { S.loadSlow = true; render(); } }, 10000);
     S.B.watchGames((list) => { clearTimeout(S.loadTimer); S.games = list || []; profiles([...new Set(S.games.flatMap((g) => Object.values(g.seats || {}).filter(Boolean)))]); render(); },
@@ -1398,7 +1401,7 @@
         <label for="ng-mode">Kdo hraje</label>
         <select id="ng-mode"><option value="table">pozvu přátele, země se vylosují při startu</option><option value="now">hraju hned sám, země se vylosuje teď</option></select>
         <label for="ng-fill">Volné velmoci převezmou</label>
-        <select id="ng-fill">${local ? '<option value="bot">jednoduší boti: jen táhnou, nemluví</option><option value="ai" disabled>AI diplomaté – jen ve verzi v Claude</option>' : '<option value="ai">AI diplomaté: vyjednávají, blafují, zrazují</option><option value="bot">jednoduší boti: jen táhnou, nemluví</option>'}</select>
+        <select id="ng-fill">${S.B.kind !== 'db' ? '<option value="bot">jednoduší boti: jen táhnou, nemluví</option><option value="ai" disabled>AI diplomaté – jen ve verzi v Claude</option>' : '<option value="ai">AI diplomaté: vyjednávají, blafují, zrazují</option><option value="bot">jednoduší boti: jen táhnou, nemluví</option>'}</select>
         <label for="ng-dl">Odpočet času</label>
         <select id="ng-dl">${Object.entries(TEMPO).map(([k, t]) => `<option value="${k}"${k === 'live' ? ' selected' : ''}>${esc(t.l)}</option>`).join('')}</select>
         ${notes}
@@ -1414,7 +1417,7 @@
         <img src="hero.jpg" alt="Vojáci na dřevěném chodníku mezi rozstřílenými stromy v Chateau Wood u Ypres, 1917" width="1600" height="920">
         <div class="herok">Velmoci <span>1901</span></div>
         <div class="herot"><h1>Diplomacie. Zrada. Válka.</h1><p>Roku 1901 je Evropa na vrcholu moci, ale pod povrchem to vře: Trojspolek Německa, Rakouska-Uherska a Itálie stojí proti spojenectví Francie a Ruska a Británie ze svých ostrovů střeží rovnováhu sil. Loděnice spouštějí na vodu nové bitevní lodě, na Balkáně to doutná a diplomaté v salonech slibují mír, kterému nikdo nevěří.</p>
-          <div class="herobtns">${myOpen.length ? `<a class="btn primary big" href="#hra-${esc(myOpen[0].id)}">Pokračovat: ${esc(myOpen[0].name || 'hra')}</a><button class="btn big ghostlight" data-act="modal-new">Nová hra</button>` : `<button class="btn primary big" data-act="modal-new">Začít novou hru</button>`}<button class="btn big ghostlight" data-act="tutorial">Jak hrát</button>${local ? `<a class="btn big ghostlight" href="${AI_URL}" target="_blank" rel="noopener">Hrát s AI diplomaty ↗</a>` : ''}</div></div>
+          <div class="herobtns">${myOpen.length ? `<a class="btn primary big" href="#hra-${esc(myOpen[0].id)}">Pokračovat: ${esc(myOpen[0].name || 'hra')}</a><button class="btn big ghostlight" data-act="modal-new">Nová hra</button>` : `<button class="btn primary big" data-act="modal-new">Začít novou hru</button>`}<button class="btn big ghostlight" data-act="tutorial">Jak hrát</button>${S.B.kind !== 'db' ? `<a class="btn big ghostlight" href="${AI_URL}" target="_blank" rel="noopener">Hrát s AI diplomaty ↗</a>` : ''}</div></div>
         <nav class="topmenu">
           ${musBtn('light')}
           <button class="menubtn" data-act="menu" aria-expanded="${S.menu ? 'true' : 'false'}" aria-haspopup="true">Menu <span class="burger" aria-hidden="true"><i></i><i></i><i></i></span></button>
