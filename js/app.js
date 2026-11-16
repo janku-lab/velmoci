@@ -226,11 +226,12 @@
 
   // ------------------------------------------------------------------ AI diplomats
   let SAMPLE = null;
+  const AI_URL = 'https://claude.ai/artifact/PSpTcC2rdCUybXMf2FfpXY'; // verze v Claude: online hra + AI diplomaté
   const AIQ = { running: 0, queue: [], tried: new Set() };
   const aiHosting = () => !!(SAMPLE && S.gid && lsGet('velmoci-aihost-' + S.gid, false) && !S.aiOff);
   function aiHostBox(g) {
     if (!g || g.status !== 'play' || !PW.some((p) => isAI(g, p))) return '';
-    if (!SAMPLE) return `<p class="muted small aibox">AI diplomaty tady spustit nejde. Běží jen v aplikaci Claude u přihlášeného hráče.</p>`;
+    if (!SAMPLE) return `<p class="muted small aibox">AI diplomaty tady spustit nejde. Běží jen v aplikaci Claude u přihlášeného hráče. <a href="${AI_URL}" target="_blank" rel="noopener">Hrát s AI diplomaty v Claude ↗</a></p>`;
     if (!myPowers(g).length && g.createdBy !== S.B.uid) return '';
     const on = aiHosting();
     const busy = AIQ.running + AIQ.queue.length;
@@ -1388,7 +1389,7 @@
     const local = S.B.kind === 'local';
     const nGames = games ? games.filter((g) => g.status !== 'over').length : 0;
     const myOpen = games ? games.filter((g) => g.status !== 'over' && mine(g)) : [];
-    const notes = `${local ? `<div class="note">Tahle kopie stránky nemá sdílené úložiště, takže hry jsou uložené jen v tomto prohlížeči. Hra proti botům funguje normálně.</div>` : ''}${!S.canWrite ? `<div class="note">Máš k téhle stránce jen čtecí přístup. Hry vidíš, ale abys mohl hrát, potřebuješ od vlastníka přístup Editor nebo Contributor.</div>` : ''}`;
+    const notes = `${local ? `<div class="note">Tahle kopie stránky nemá sdílené úložiště, takže hry jsou uložené jen v tomto prohlížeči. Hra proti botům funguje normálně. Online hru s přáteli a AI diplomaty najdeš <a href="${AI_URL}" target="_blank" rel="noopener">ve verzi v Claude ↗</a>.</div>` : ''}${!S.canWrite ? `<div class="note">Máš k téhle stránce jen čtecí přístup. Hry vidíš, ale abys mohl hrát, potřebuješ od vlastníka přístup Editor nebo Contributor.</div>` : ''}`;
     let modal = '';
     if (S.modal === 'new') modal = `<form id="newgame" class="mbox">
         <div class="mhead"><h2>Nová hra</h2><button type="button" class="btn sm ghost" data-act="modal-off" aria-label="Zavřít">×</button></div>
@@ -1397,7 +1398,7 @@
         <label for="ng-mode">Kdo hraje</label>
         <select id="ng-mode"><option value="table">pozvu přátele, země se vylosují při startu</option><option value="now">hraju hned sám, země se vylosuje teď</option></select>
         <label for="ng-fill">Volné velmoci převezmou</label>
-        <select id="ng-fill"><option value="ai">AI diplomaté: vyjednávají, blafují, zrazují</option><option value="bot">jednoduší boti: jen táhnou, nemluví</option></select>
+        <select id="ng-fill">${local ? '<option value="bot">jednoduší boti: jen táhnou, nemluví</option><option value="ai" disabled>AI diplomaté – jen ve verzi v Claude</option>' : '<option value="ai">AI diplomaté: vyjednávají, blafují, zrazují</option><option value="bot">jednoduší boti: jen táhnou, nemluví</option>'}</select>
         <label for="ng-dl">Odpočet času</label>
         <select id="ng-dl">${Object.entries(TEMPO).map(([k, t]) => `<option value="${k}"${k === 'live' ? ' selected' : ''}>${esc(t.l)}</option>`).join('')}</select>
         ${notes}
@@ -1413,7 +1414,7 @@
         <img src="hero.jpg" alt="Vojáci na dřevěném chodníku mezi rozstřílenými stromy v Chateau Wood u Ypres, 1917" width="1600" height="920">
         <div class="herok">Velmoci <span>1901</span></div>
         <div class="herot"><h1>Diplomacie. Zrada. Válka.</h1><p>Roku 1901 je Evropa na vrcholu moci, ale pod povrchem to vře: Trojspolek Německa, Rakouska-Uherska a Itálie stojí proti spojenectví Francie a Ruska a Británie ze svých ostrovů střeží rovnováhu sil. Loděnice spouštějí na vodu nové bitevní lodě, na Balkáně to doutná a diplomaté v salonech slibují mír, kterému nikdo nevěří.</p>
-          <div class="herobtns">${myOpen.length ? `<a class="btn primary big" href="#hra-${esc(myOpen[0].id)}">Pokračovat: ${esc(myOpen[0].name || 'hra')}</a><button class="btn big ghostlight" data-act="modal-new">Nová hra</button>` : `<button class="btn primary big" data-act="modal-new">Začít novou hru</button>`}<button class="btn big ghostlight" data-act="tutorial">Jak hrát</button></div></div>
+          <div class="herobtns">${myOpen.length ? `<a class="btn primary big" href="#hra-${esc(myOpen[0].id)}">Pokračovat: ${esc(myOpen[0].name || 'hra')}</a><button class="btn big ghostlight" data-act="modal-new">Nová hra</button>` : `<button class="btn primary big" data-act="modal-new">Začít novou hru</button>`}<button class="btn big ghostlight" data-act="tutorial">Jak hrát</button>${local ? `<a class="btn big ghostlight" href="${AI_URL}" target="_blank" rel="noopener">Hrát s AI diplomaty ↗</a>` : ''}</div></div>
         <nav class="topmenu">
           ${musBtn('light')}
           <button class="menubtn" data-act="menu" aria-expanded="${S.menu ? 'true' : 'false'}" aria-haspopup="true">Menu <span class="burger" aria-hidden="true"><i></i><i></i><i></i></span></button>
