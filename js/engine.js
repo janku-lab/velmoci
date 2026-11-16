@@ -505,9 +505,10 @@
 
   // ---------- BOT ----------
   function rng(seed) { let x = seed >>> 0 || 1; return () => ((x = (x * 1664525 + 1013904223) >>> 0) / 4294967296); }
-  function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  let SALT = ''; // jen pro testy (různé partie se stejnými boty)
+  function hashStr(s) { s = SALT + s; let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 
-  function botMovement(st, pw) {
+  function botMovementV1(st, pw) {
     const R = rng(hashStr(phaseKey(st) + pw));
     const mine = st.units.filter((u) => u.o === pw);
     const enemyAdj = (p) => st.units.some((e) => e.o !== pw && canReach(e, p));
@@ -630,10 +631,201 @@
     const ranked = mine.map((u) => ({ u, d: Math.min(distToSet(u, targets), 50) })).sort((a, b) => b.d - a.d);
     return ranked.slice(0, -n).map((x) => ({ k: 'X', p: x.u.p }));
   }
-  function botOrders(st, pw) {
-    if (st.type === 'M') return botMovement(st, pw);
-    if (st.type === 'R') return botRetreats(st, pw);
-    if (st.type === 'A') return botAdjust(st, pw);
+  // ---------- BOT v2: hodnoty provincií + výběr z více variant simulací tahu ----------
+  function provValues(st, pw) {
+    const str = {}; for (const q of POWERS) str[q] = Math.max(1, scCount(st, q));
+    const threat = (p) => st.units.filter((e) => e.o !== pw && canReach(e, p)).length;
+    const V = {};
+    for (const p of SC) {
+      const own = st.sc[p];
+      if (own === pw) { const t = threat(p); if (t) V[p] = 5 + 4 * t; }
+      else {
+        let v = own ? 7 + Math.min(4, str[own] * 0.6) : 11;
+        const occ = unitAt(st, p);
+        if (!occ) v += 3; else if (occ.o !== pw) v -= 2;
+        V[p] = v;
+      }
+    }
+    return V;
+  }
+  function spread(st, pw, V, t) {
+    // D[p] = nejlepší hodnota cíle dosažitelného z p, tlumená vzdáleností
+    const D = {};
+    for (const s in V) {
+      const d = bfsFrom(s, t);
+      for (const p in d) { const v = V[s] * Math.pow(0.55, d[p]); if (!D[p] || v > D[p]) D[p] = v; }
+    }
+    return D;
+  }
+  function genOrders(st, pw, ctx, R, temp) {
+    const mine = st.units.filter((u) => u.o === pw);
+    const fall = st.season === 'F';
+    const plans = mine.map((u) => {
+      const D = ctx.D[u.t];
+      const opts = [];
+      let hv = (D[u.p] || 0) * 0.9;
+      if (SC.includes(u.p) && st.sc[u.p] === pw && ctx.V[u.p]) hv += ctx.V[u.p] * 0.8; // bránit ohrožené centrum
+      if (fall && SC.includes(u.p) && st.sc[u.p] !== pw) hv += 14; // udržet dobyté centrum do podzimu
+      opts.push({ k: 'H', to: u.p, s: hv + R() * temp });
+      for (const n of unitNeighbors(u)) {
+        let v = D[n.p] || 0;
+        if (SC.includes(n.p) && st.sc[n.p] !== pw) v += fall ? 9 : 4;
+        const occ = unitAt(st, n.p);
+        if (occ && occ.o === pw) v -= 3;
+        if (occ && occ.o !== pw) v *= 0.8;
+        opts.push({ k: 'M', to: n.p, tc: n.c, s: v + R() * temp });
+      }
+      opts.sort((a, b) => b.s - a.s);
+      return { u, opts };
+    });
+    plans.sort((a, b) => b.opts[0].s - a.opts[0].s);
+    const taken = new Set(); const ch = {};
+    for (const pl of plans) {
+      const pick = pl.opts.find((o) => !taken.has(o.to)) || { k: 'H', to: pl.u.p };
+      taken.add(pick.to); ch[pl.u.p] = pick;
+    }
+    // žádné výměny vlastních jednotek a tahy do vlastní stojící jednotky
+    for (let it = 0; it < 3; it++) for (const u of mine) {
+      const c = ch[u.p]; if (c.k !== 'M') continue;
+      const occ = unitAt(st, c.to);
+      if (occ && occ.o === pw && (ch[occ.p].k !== 'M' || ch[occ.p].to === u.p)) ch[u.p] = { k: 'H', to: u.p };
+    }
+    const orders = [];
+    // podpory: jednotky, které jen stojí, podpoří tah do sporné provincie nebo obranu centra
+    for (const u of mine) {
+      const c = ch[u.p];
+      if (c.k !== 'H') continue;
+      if (fall && SC.includes(u.p) && st.sc[u.p] !== pw) continue;
+      let best = null;
+      for (const o of mine) {
+        if (o === u) continue;
+        const oc = ch[o.p] || { k: 'S' };
+        if (oc.k === 'M') {
+          if (!canReach(u, oc.to)) continue;
+          const occ = unitAt(st, oc.to);
+          const contested = (occ && occ.o !== pw) || st.units.some((e) => e.o !== pw && canReach(e, oc.to));
+          if (!contested) continue;
+          const w = (ctx.V[oc.to] || 2) + (occ ? 4 : 1) + R();
+          if (!best || w > best.w) best = { w, o: { p: u.p, k: 'S', sp: o.p, st: oc.to } };
+        } else if (ctx.V[o.p] && st.sc[o.p] === pw && canReach(u, o.p)) {
+          const w = ctx.V[o.p] * 0.7 + R();
+          if (!best || w > best.w) best = { w, o: { p: u.p, k: 'S', sp: o.p, st: null } };
+        }
+      }
+      const ownThreat = SC.includes(u.p) && st.sc[u.p] === pw && ctx.V[u.p];
+      if (best && !(ownThreat && best.w < ctx.V[u.p])) { ch[u.p] = null; orders.push(best.o); }
+    }
+    for (const u of mine) {
+      const c = ch[u.p]; if (!c) continue;
+      orders.push(c.k === 'M' ? { p: u.p, k: 'M', to: c.to, tc: c.tc || null } : { p: u.p, k: 'H' });
+    }
+    return orders;
+  }
+  function scoreResult(st, pw, res, ctx) {
+    const fall = st.season === 'F';
+    let s = 0;
+    for (const u of res.units) {
+      if (u.o === pw) {
+        s += (ctx.D[u.t][u.p] || 0) * 0.35;
+        if (SC.includes(u.p)) s += st.sc[u.p] === pw ? 1 : (fall ? 14 : 5);
+      } else if (SC.includes(u.p) && st.sc[u.p] === pw) s -= fall ? 14 : 5;
+    }
+    for (const d of res.dislodged) if (d.o === pw) s -= d.opts.length ? 6 : 10;
+    return s;
+  }
+  function botMovementV2(st, pw) {
+    const R = rng(hashStr(phaseKey(st) + pw + 'v2'));
+    const V = provValues(st, pw);
+    const ctx = { V, D: { A: spread(st, pw, V, 'A'), F: spread(st, pw, V, 'F') } };
+    // předpověď soupeřů: jednoduchý bot + agresivní varianta (útoky na naše centra)
+    const others = POWERS.filter((q) => q !== pw && unitCount(st, q) > 0);
+    const base = [].concat(...others.map((q) => botMovementV1(st, q)));
+    const aggr = base.map((o) => {
+      const u = unitAt(st, o.p);
+      const tgt = SC.find((c) => st.sc[c] === pw && canReach(u, c) && !base.some((b) => b.k === 'M' && b.to === c && b.p !== o.p));
+      if (tgt && R() < 0.6) { const cs = moveCoasts(u, tgt); return { p: o.p, k: 'M', to: tgt, tc: cs[0] || null }; }
+      return o;
+    });
+    let best = null;
+    const N = 14;
+    for (let i = 0; i < N; i++) {
+      const mine = genOrders(st, pw, ctx, R, i === 0 ? 0 : 1 + i * 0.5);
+      const s = scoreResult(st, pw, adjudicateMovement(st, mine.concat(base)), ctx) * 0.5
+        + scoreResult(st, pw, adjudicateMovement(st, mine.concat(aggr)), ctx) * 0.5;
+      if (!best || s > best.s) best = { s, mine };
+    }
+    // lokální vylepšení: zkusit u každé jednotky jiný rozkaz (drž, tah, podpora) a nechat lepší
+    const evalSet = (mine) => scoreResult(st, pw, adjudicateMovement(st, mine.concat(base)), ctx) * 0.5
+      + scoreResult(st, pw, adjudicateMovement(st, mine.concat(aggr)), ctx) * 0.5;
+    let cur = best.mine, curS = best.s;
+    for (let pass = 0; pass < 2; pass++) {
+      let improved = false;
+      for (let i = 0; i < cur.length; i++) {
+        const u = unitAt(st, cur[i].p);
+        const alts = [{ p: u.p, k: 'H' }];
+        for (const n of unitNeighbors(u)) alts.push({ p: u.p, k: 'M', to: n.p, tc: n.c });
+        for (const o of cur) {
+          if (o.p === u.p) continue;
+          if (o.k === 'M' && o.to !== u.p && canReach(u, o.to)) alts.push({ p: u.p, k: 'S', sp: o.p, st: o.to });
+          else if (o.k !== 'M' && canReach(u, o.p)) alts.push({ p: u.p, k: 'S', sp: o.p, st: null });
+        }
+        for (const a of alts) {
+          const trial = cur.slice(); trial[i] = a;
+          const sc = evalSet(trial);
+          if (sc > curS + 0.01) { cur = trial; curS = sc; improved = true; }
+        }
+      }
+      if (!improved) break;
+    }
+    return cur;
+  }
+  function botRetreatsV2(st, pw) {
+    const V = provValues(st, pw);
+    const out = [];
+    for (const d of st.dislodged.filter((x) => x.o === pw)) {
+      const D = spread(st, pw, V, d.t);
+      let best = null;
+      for (const opt of d.opts) {
+        const [p, c] = opt.split('/');
+        let s = (D[p] || 0) + (SC.includes(p) && st.sc[p] !== pw && st.season === 'F' ? 10 : 0) + (V[p] && st.sc[p] === pw ? 4 : 0);
+        if (!best || s > best.s) best = { s, p, c: c || null };
+      }
+      out.push(best ? { p: d.p, k: 'R', to: best.p, tc: best.c } : { p: d.p, k: 'X' });
+    }
+    return out;
+  }
+  function botAdjustV2(st, pw) {
+    const n = adjustmentNeeds(st)[pw];
+    if (!n) return [];
+    const V = provValues(st, pw);
+    const DA = spread(st, pw, V, 'A'), DF = spread(st, pw, V, 'F');
+    if (n > 0) {
+      const free = HOME[pw].filter((h) => st.sc[h] === pw && !unitAt(st, h));
+      const cand = [];
+      for (const h of free) {
+        cand.push({ k: 'B', p: h, t: 'A', c: null, s: (DA[h] || 0) + (V[h] || 0) });
+        if (isCoastal(h)) {
+          if (SPLIT[h]) for (const cc of Object.keys(SPLIT[h])) {
+            const best = Math.max(0, ...SPLIT[h][cc].map((q) => DF[q] || 0));
+            cand.push({ k: 'B', p: h, t: 'F', c: cc, s: best * 0.9 + (V[h] || 0) });
+          } else cand.push({ k: 'B', p: h, t: 'F', c: null, s: (DF[h] || 0) + (V[h] || 0) });
+        }
+      }
+      cand.sort((a, b) => b.s - a.s);
+      const used = new Set(); const res = [];
+      for (const c of cand) { if (res.length >= n) break; if (used.has(c.p)) continue; used.add(c.p); res.push({ k: 'B', p: c.p, t: c.t, c: c.c }); }
+      return res;
+    }
+    const mine = st.units.filter((u) => u.o === pw).map((u) => ({ u, s: ((u.t === 'A' ? DA : DF)[u.p] || 0) + (V[u.p] && st.sc[u.p] === pw ? V[u.p] : 0) }));
+    mine.sort((a, b) => a.s - b.s);
+    return mine.slice(0, -n).map((x) => ({ k: 'X', p: x.u.p }));
+  }
+  let BOT_LEVEL = 2;
+  function botOrders(st, pw, level) {
+    const v2 = (level || BOT_LEVEL) >= 2;
+    if (st.type === 'M') return v2 ? botMovementV2(st, pw) : botMovementV1(st, pw);
+    if (st.type === 'R') return v2 ? botRetreatsV2(st, pw) : botRetreats(st, pw);
+    if (st.type === 'A') return v2 ? botAdjustV2(st, pw) : botAdjust(st, pw);
     return [];
   }
 
@@ -664,5 +856,6 @@
     initialState, phaseKey, phaseName, unitAt, scCount, unitCount, orderText, loc,
     adjudicateMovement, adjudicateRetreats, adjudicateAdjustments, adjustmentNeeds,
     advance, actingPowers, alive, botOrders, dist, parseOrder,
+    _test: { setSalt: (x) => { SALT = String(x); }, setLevel: (l) => { BOT_LEVEL = l; } },
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -20,6 +20,7 @@
 
 ## Jak pracovat
 - Dělej cílené úpravy jen v dotčeném souboru, nepřepisuj celé soubory.
+- Boti: `botOrders(st, pw, level)` v engine.js – v2 (výchozí): hodnoty provincií + 14 variant tahů ověřených rozhodčím proti předpovědi soupeřů + lokální vylepšování; v1 = původní jednoduchý bot (soupeř pro testy). Sílu měř `node tools/bench.js 10 1912` (průměr center v2 vs v1, poslední měření 6,9 vs 4,8).
 - Test enginu: `node -e 'global.window=globalThis;require("./js/data.js");require("./js/engine.js");…'`
 - Lokální náhled: `python3 -m http.server` a otevřít `http://localhost:8000/` (`#mapa` = průzkumník mapy, `#tutorial`).
 - Komunikace s Danielem česky, stručně.
