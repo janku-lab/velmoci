@@ -12,7 +12,8 @@
 - `map.jpg`, `hero.jpg`, `music/*.mp3` – assety
 
 ## Důležité
-- Online hra (sdílená databáze, přihlášení, AI hráči přes `window.claude.use('db'|'user'|'sample')`) funguje jen v Claude artefaktu. Mimo něj (GitHub Pages, lokálně) běží `localBackend` – hra jen v jednom prohlížeči (localStorage), boti místo AI.
+- Backendy (vybírá `boot()` v app.js): v Claude artefaktu `dbBackend` (Claude db/user/sample, včetně AI diplomatů; AI nefunguje u veřejně sdíleného artefaktu). Na vlastním webu `js/fb.js` = Firebase projekt `velmoci-b14db` (anonymní přihlášení, Firestore europe-west3, přezdívky v `profiles`, zámky v `leases`) – online hra s přáteli, bez AI. Když Firebase selže, `localBackend` (jen tento prohlížeč).
+- Web načítá skripty přes `js/gate.js` (heslo, pak Firebase SDK + fb.js + hra).
 - Kódy provincií jsou anglické zkratky (VIE, BUD…), texty v UI česky. Pobřeží: NC/SC/EC → česky SP/JP/VP.
 - Jednotky: A = armáda, F = loďstvo (v UI „L“).
 
