@@ -113,6 +113,50 @@
   }
   const nameOf = (uid) => (uid === S.B.uid ? 'ty' : (S.names[uid] || 'hráč'));
 
+  // ------------------------------------------------------------------ upozornění (na tahu, dochází čas, soukromé zprávy)
+  const NT = { on: lsGet('velmoci-notify', true), title: document.title, blink: null, warned: {}, phases: null, chatN: {} };
+  const ntPerm = () => ('Notification' in window ? Notification.permission : 'unsupported');
+  function beep() {
+    try {
+      const C = NT.ac || (NT.ac = new (window.AudioContext || window.webkitAudioContext)());
+      if (C.state === 'suspended') C.resume();
+      [0, 0.18].forEach((d, i) => { const o = C.createOscillator(), gn = C.createGain(), t = C.currentTime + d; o.frequency.value = i ? 880 : 660; gn.gain.setValueAtTime(0.0001, t); gn.gain.exponentialRampToValueAtTime(0.12, t + 0.02); gn.gain.exponentialRampToValueAtTime(0.0001, t + 0.3); o.connect(gn).connect(C.destination); o.start(t); o.stop(t + 0.32); });
+    } catch (e) { /* ignore */ }
+  }
+  function notify(title, body, gid) {
+    if (!NT.on) return;
+    beep();
+    if (!document.hidden) return;
+    clearInterval(NT.blink); let k = 0;
+    NT.blink = setInterval(() => { document.title = k++ % 2 ? NT.title : '● ' + title; }, 1000);
+    if (ntPerm() === 'granted') {
+      try { const n = new Notification(title, { body, tag: 'velmoci-' + (gid || ''), icon: 'hero.jpg' }); n.onclick = () => { window.focus(); if (gid) location.hash = 'hra-' + gid; n.close(); }; } catch (e) { /* ignore */ }
+    }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { clearInterval(NT.blink); document.title = NT.title; } });
+  async function ntToggle() {
+    if (NT.on && ntPerm() !== 'default') { NT.on = false; lsSet('velmoci-notify', false); flash('Upozornění vypnuta.'); render(); return; }
+    NT.on = true; lsSet('velmoci-notify', true); beep();
+    if (ntPerm() === 'default') { try { await Notification.requestPermission(); } catch (e) { /* ignore */ } }
+    flash(ntPerm() === 'granted' ? 'Upozornění zapnuta: ozvu se, když budeš na tahu nebo bude docházet čas.' : 'Upozornění zapnuta: zvuk a blikající záložka (systémová oznámení prohlížeč nepovolil).');
+    render();
+  }
+  const ntHint = () => (!NT.on ? 'vypnuto' : ntPerm() === 'default' ? 'povolit oznámení' : 'zapnuto');
+  const myTurn = (g) => !!(g && g.status === 'play' && g.state && g.seats && E.actingPowers(g.state).some((p) => g.seats[p] === S.B.uid));
+  // v seznamu her: upozornit na nové kolo i v partiích, které teď nemám otevřené
+  function ntGames(list) {
+    const first = !NT.phases; NT.phases = NT.phases || {};
+    for (const g of list) {
+      if (!Object.values(g.seats || {}).includes(S.B.uid)) continue;
+      const k = g.status + (g.state ? E.phaseKey(g.state) : '');
+      if (!first && NT.phases[g.id] && NT.phases[g.id] !== k && g.id !== S.gid && myTurn(g)) {
+        notify('Na tahu: ' + (g.name || 'hra'), E.phaseName(g.state), g.id);
+        flash('Jsi na tahu ve hře ' + (g.name || '') + '.');
+      }
+      NT.phases[g.id] = k;
+    }
+  }
+
   // ------------------------------------------------------------------ boot
   async function boot() {
     render();
@@ -128,7 +172,7 @@
       catch (e) { console.warn('Online režim nedostupný', e); S.B = localBackend(); }
     } else S.B = localBackend();
     S.loadTimer = setTimeout(() => { if (!S.games) { S.loadSlow = true; render(); } }, 10000);
-    S.B.watchGames((list) => { clearTimeout(S.loadTimer); S.games = list || []; profiles([...new Set(S.games.flatMap((g) => Object.values(g.seats || {}).filter(Boolean)))]); render(); },
+    S.B.watchGames((list) => { clearTimeout(S.loadTimer); S.games = list || []; ntGames(S.games); profiles([...new Set(S.games.flatMap((g) => Object.values(g.seats || {}).filter(Boolean)))]); render(); },
       () => { S.games = []; S.loadErr = true; render(); });
     const h = (location.hash || '').replace('#', '');
     if (h.startsWith('hra-')) openGame(h.slice(4));
@@ -145,11 +189,15 @@
     try { if (location.hash !== '#hra-' + id) location.hash = 'hra-' + id; } catch (e) { /* ignore */ }
     S.unsub.push(S.B.watchGame(id, (g) => {
       const prevKey = S.game && S.game.state && E.phaseKey(S.game.state);
+      const prevStatus = S.game && S.game.status;
       S.game = g;
       if (g) {
         profiles(Object.values(g.seats || {}).filter(Boolean));
         const mp = myPowers(g);
         if (!S.myPower || !mp.includes(S.myPower)) S.myPower = mp[0] || null;
+        if (prevStatus === 'lobby' && g.status === 'play') notify('Hra začala: ' + (g.name || ''), 'Los padl, jdi se podívat, za koho hraješ.', g.id);
+        else if (prevKey && g.state && prevKey !== E.phaseKey(g.state) && g.status === 'over') notify('Konec hry: ' + (g.name || ''), g.state.winner ? 'Vyhrálo ' + E.PNAME[g.state.winner] : 'Hra skončila.', g.id);
+        else if (prevKey && g.state && prevKey !== E.phaseKey(g.state) && myTurn(g)) notify('Na tahu: ' + E.phaseName(g.state), g.name || '', g.id);
         if (prevKey && g.state && prevKey !== E.phaseKey(g.state)) { S.sel = null; S.view = null; flash('Nové kolo: ' + E.phaseName(g.state)); if (g.state.type !== 'M' && E.actingPowers(g.state).some((p) => mp.includes(p))) { if (S.L.float !== 'orders') S.tab = 'orders'; if (S.L.mode === 'map') S.L.mode = 'split'; } }
       }
       render(); maybeResolve(false); aiTick(); maybeAutoStart(g);
@@ -167,11 +215,18 @@
       if (S.rp) { S.rp.data = rpBuild(S.rp.i); }
       render();
     }));
-    S.unsub.push(S.B.watchSub(id, 'chat', (docs) => { S.chat = docs.sort((a, b) => a.t - b.t); profiles([...new Set(docs.map((d) => d.uid).filter(Boolean))]); renderChat(); updateTabs(); aiTick(); }));
+    S.unsub.push(S.B.watchSub(id, 'chat', (docs) => {
+      const known = NT.chatN[id]; NT.chatN[id] = docs.length;
+      if (known != null && docs.length > known && S.game) {
+        const mine = myPowers(S.game);
+        const nw = docs.slice().sort((a, b) => a.t - b.t).slice(known).filter((m) => m.uid !== S.B.uid && mine.includes(m.to));
+        if (nw.length) notify('Zpráva od: ' + (E.PNAME[nw[nw.length - 1].from] || 'hráč'), nw[nw.length - 1].voice ? '🎙 hlasový vzkaz' : String(nw[nw.length - 1].text || '').slice(0, 120), id);
+      }
+      S.chat = docs.sort((a, b) => a.t - b.t); profiles([...new Set(docs.map((d) => d.uid).filter(Boolean))]); renderChat(); updateTabs(); aiTick(); }));
     render();
   }
   function closeGame(silent) {
-    clearTimeout(S.rpT); S.rp = null;
+    clearTimeout(S.rpT); S.rp = null; recStop(true); AUD.clear();
     S.unsub.forEach((f) => { try { f(); } catch (e) { /* ignore */ } });
     S.unsub = []; S.gid = null; S.game = null;
     if (!silent) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; } render(); }
@@ -208,7 +263,15 @@
           const dd = docs.find((x) => x.id === p);
           if (isAI(fresh, p) && st.type === 'M' && dd && dd.key === k && dd.uid === 'ai') ob[p] = dec(dd.enc);
           else if (isBot(fresh, p)) ob[p] = E.botOrders(st, p);
-          else { const d = docs.find((x) => x.id === p); ob[p] = d && d.key === k ? dec(d.enc) : []; }
+          else {
+            const d = docs.find((x) => x.id === p); ob[p] = d && d.key === k ? dec(d.enc) : [];
+            // hráč nestihl limit: podle nastavení hry za něj dohraje bot (u rozkazů, které nezadal)
+            if (late && i === 0 && fresh.afk !== 'hold' && !(d && d.key === k && d.ready)) {
+              const have = new Set(ob[p].map((o) => o.p));
+              const bo = E.botOrders(st, p);
+              ob[p] = st.type === 'A' ? (ob[p].length ? ob[p] : bo) : ob[p].concat(bo.filter((o) => !have.has(o.p)));
+            }
+          }
         }
         const r = E.advance(st, ob);
         recs.push(Object.assign({}, r.record, { n: seq++ }));
@@ -1406,6 +1469,8 @@
         <select id="ng-fill">${S.B.kind !== 'db' ? '<option value="bot">jednoduší boti: jen táhnou, nemluví</option><option value="ai" disabled>AI diplomaté – jen ve verzi v Claude</option>' : '<option value="ai">AI diplomaté: vyjednávají, blafují, zrazují</option><option value="bot">jednoduší boti: jen táhnou, nemluví</option>'}</select>
         <label for="ng-dl">Odpočet času</label>
         <select id="ng-dl">${Object.entries(TEMPO).map(([k, t]) => `<option value="${k}"${k === 'live' ? ' selected' : ''}>${esc(t.l)}</option>`).join('')}</select>
+        <label for="ng-afk">Když hráč nestihne odevzdat rozkazy</label>
+        <select id="ng-afk"><option value="bot">chybějící rozkazy za něj dá bot</option><option value="hold">jednotky jen drží (přísně podle pravidel)</option></select>
         ${notes}
         <button type="submit" class="btn primary big" ${S.canWrite ? '' : 'disabled'}>Založit hru</button>
       </form>`;
@@ -1419,6 +1484,7 @@
         <img src="hero.jpg" alt="Vojáci na dřevěném chodníku mezi rozstřílenými stromy v Chateau Wood u Ypres, 1917" width="1600" height="920">
         <div class="herok">Velmoci <span>1901</span></div>
         <div class="herot"><h1>Diplomacie. Zrada. Válka.</h1><p>Roku 1901 je Evropa na vrcholu moci, ale pod povrchem to vře: Trojspolek Německa, Rakouska-Uherska a Itálie stojí proti spojenectví Francie a Ruska a Británie ze svých ostrovů střeží rovnováhu sil. Loděnice spouštějí na vodu nové bitevní lodě, na Balkáně to doutná a diplomaté v salonech slibují mír, kterému nikdo nevěří.</p>
+          ${myOpen.length > 1 ? `<ul class="mygames">${myOpen.slice(0, 5).map((g) => `<li><a href="#hra-${esc(g.id)}"><span class="mgn">${esc(g.name || 'hra')}</span><span class="mgp">${esc(g.status === 'lobby' ? 'u stolu' : g.state ? E.phaseName(g.state) : '')}</span>${myTurn(g) ? '<span class="mgt">na tahu</span>' : ''}</a></li>`).join('')}</ul>` : ''}
           <div class="herobtns">${myOpen.length ? `<a class="btn primary big" href="#hra-${esc(myOpen[0].id)}">Pokračovat: ${esc(myOpen[0].name || 'hra')}</a><button class="btn big ghostlight" data-act="modal-new">Nová hra</button>` : `<button class="btn primary big" data-act="modal-new">Začít novou hru</button>`}<button class="btn big ghostlight" data-act="tutorial">Jak hrát</button>${S.B.kind !== 'db' ? `<a class="btn big ghostlight" href="${AI_URL}" target="_blank" rel="noopener">Hrát s AI diplomaty ↗</a>` : ''}</div></div>
         <nav class="topmenu">
           ${musBtn('light')}
@@ -1430,6 +1496,7 @@
             <hr>
             <button role="menuitem" data-act="explore"><span>Průvodce tahy</span><kbd>G</kbd></button>
             <button role="menuitem" data-act="keys"><span>Klávesové zkratky</span><kbd>?</kbd></button>
+            <button role="menuitem" data-act="notify"><span>Upozornění na tah</span><span class="mhint">${ntHint()}</span></button>
           </div>` : ''}
         </nav>
       </section>
@@ -1456,7 +1523,8 @@
     const vs = viewState();
     const phase = S.view != null ? S.history[S.view].name : E.phaseName(st);
     const mapScroll = $('#mapwrap') ? [$('#mapwrap').scrollLeft, $('#mapwrap').scrollTop] : null;
-    const chatDraft = $('#chat-in') ? $('#chat-in').value : '';
+    const chatDraft = $('#chat-in') ? $('#chat-in').value : (S.rec ? '' : S.chatKeep || '');
+    if ($('#chat-in') || !S.rec) S.chatKeep = '';
     const L = S.L; const floatTab = !mobile() && L.float ? L.float : null;
     let dock = S.tab; if (dock === floatTab) dock = TABS.map((t) => t[0]).find((t) => t !== floatTab);
     const floatScroll = $('#fwin .pane') ? $('#fwin .pane').scrollTop : 0;
@@ -1657,6 +1725,7 @@
         <div class="mrow"><span class="mlab">Zobrazení</span><div class="seg sm" role="group" aria-label="Rozložení"><button class="btn xs${L.mode === 'map' ? ' on' : ''}" data-act="lay-mode" data-m="map">Mapa</button><button class="btn xs${L.mode === 'split' ? ' on' : ''}" data-act="lay-mode" data-m="split">Obojí</button><button class="btn xs${L.mode === 'panel' ? ' on' : ''}" data-act="lay-mode" data-m="panel">Panel</button></div></div>
         ${L.mode === 'split' && !mobile() ? `<button role="menuitem" data-act="lay-swap"><span>Panel ${L.side === 'right' ? 'vlevo' : 'vpravo'}</span><span class="mhint">⇄</span></button>` : ''}
         <button role="menuitem" data-act="music"><span>Hudba</span><span class="mhint">${MUS.on ? 'zapnuto' : 'vypnuto'}</span></button>
+        <button role="menuitem" data-act="notify"><span>Upozornění na tah</span><span class="mhint">${ntHint()}</span></button>
         <hr>
         ${end}
         <button role="menuitem" data-act="home"><span>Zpět na úvodní obrazovku</span></button>
@@ -1829,8 +1898,62 @@
     if (!opts.some((o) => o[0] === S.chatTo)) S.chatTo = 'ALL';
     return `<div class="chat"><div class="msgs" id="msgs"></div>
       ${mine.length ? `<form id="chatf" class="chatf"><select id="chat-to" aria-label="Komu">${opts.map(([v, l]) => `<option value="${v}"${S.chatTo === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
-      <div class="chrow"><input id="chat-in" maxlength="500" placeholder="Navrhni spojenectví…" autocomplete="off"><button class="btn primary" type="submit">Poslat</button></div></form>` : '<p class="muted small">Psát můžou jen hráči.</p>'}
+      <div class="chrow">${S.rec ? `<span class="recbar"><span class="recdot" aria-hidden="true"></span>Nahrávám <b id="rec-t">0:00</b><span class="muted small">max 1 min</span></span><button type="button" class="btn" data-act="rec-cancel">Zrušit</button><button type="button" class="btn primary" data-act="rec-stop">Odeslat</button>`
+        : `<input id="chat-in" maxlength="500" placeholder="Navrhni spojenectví…" autocomplete="off"><button type="button" class="btn mic" data-act="rec" title="Nahrát hlasový vzkaz (max 1 min)" aria-label="Nahrát hlasový vzkaz"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg></button><button class="btn primary" type="submit">Poslat</button>`}</div></form>` : '<p class="muted small">Psát můžou jen hráči.</p>'}
       <p class="muted small">Soukromé zprávy vidí jen adresát. AI diplomaté odpovídají a sami píšou, ale jejich slovo nic neznamená. Jednoduší boti nevyjednávají.</p>${aiHostBox(g)}</div>`;
+  }
+  // ---------- hlasové vzkazy: MediaRecorder (Opus ~24 kb/s) → data URL přímo ve zprávě chatu; přepis řeči, kde to prohlížeč umí
+  const AUD = new Map();
+  const REC_MAX = 60;
+  async function recStart() {
+    if (S.rec) return;
+    const g = S.game; const from = S.myPower || (g && myPowers(g)[0]); if (!from) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { flash('Tenhle prohlížeč neumí nahrávat zvuk.'); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+    catch (e) { flash('Bez přístupu k mikrofonu to nepůjde. Povol ho v prohlížeči.'); return; }
+    const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    let mr;
+    try { mr = new MediaRecorder(stream, Object.assign({ audioBitsPerSecond: 24000 }, mime ? { mimeType: mime } : {})); }
+    catch (e) { stream.getTracks().forEach((t) => t.stop()); flash('Nahrávání se nepodařilo spustit.'); return; }
+    const inp = $('#chat-in'); S.chatKeep = inp ? inp.value : '';
+    const R = S.rec = { mr, stream, chunks: [], t0: Date.now(), to: S.chatTo, from, gid: S.gid, cancel: false, text: '' };
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) R.chunks.push(e.data); };
+    mr.onstop = () => recDone(R);
+    mr.start(1000);
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SR) {
+      try {
+        const sr = R.sr = new SR(); sr.lang = 'cs-CZ'; sr.continuous = true; sr.interimResults = false;
+        sr.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) R.text += (R.text ? ' ' : '') + e.results[i][0].transcript.trim(); };
+        sr.onerror = () => {}; sr.start();
+      } catch (e) { R.sr = null; }
+    }
+    R.tick = setInterval(() => { const sec = Math.floor((Date.now() - R.t0) / 1000); const el = $('#rec-t'); if (el) el.textContent = fmtLeft(sec * 1000); if (sec >= REC_MAX) recStop(false); }, 250);
+    render();
+  }
+  function recStop(cancel) {
+    const R = S.rec; if (!R || R.stopping) return;
+    R.stopping = true; R.cancel = !!cancel; R.t1 = Date.now(); clearInterval(R.tick);
+    try { if (R.sr) R.sr.stop(); } catch (e) { /* ignore */ }
+    try { R.mr.stop(); } catch (e) { recDone(R); }
+  }
+  async function recDone(R) {
+    R.stream.getTracks().forEach((t) => t.stop());
+    if (S.rec === R) S.rec = null;
+    render();
+    if (R.cancel) return;
+    const dur = Math.round(((R.t1 || Date.now()) - R.t0) / 1000);
+    if (dur < 1 || !R.chunks.length) { flash('Vzkaz je moc krátký.'); return; }
+    if (R.sr) await new Promise((r) => setTimeout(r, 800)); // dočkat se posledního kousku přepisu
+    const blob = new Blob(R.chunks, { type: R.mr.mimeType || 'audio/webm' });
+    let url;
+    try { url = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); }); } catch (e) { flash('Vzkaz se nepodařilo zpracovat.'); return; }
+    if (url.length > 900000) { flash('Vzkaz je moc dlouhý, zkus kratší.'); return; }
+    const g = S.game; if (!g || S.gid !== R.gid) return;
+    const label = '🎙 hlasový vzkaz (' + fmtLeft(dur * 1000) + ')';
+    try { await S.B.addSub(R.gid, 'chat', { from: R.from, to: R.to, text: R.text ? label + ': ' + R.text : label, voice: url, dur, tr: R.text || '', t: Date.now(), uid: S.B.uid, ph: E.phaseName(g.state).split(' · ')[0] }); }
+    catch (e) { flash('Hlasový vzkaz se nepodařilo odeslat.'); }
   }
   function visibleChat() {
     const g = S.game; if (!g) return [];
@@ -1842,7 +1965,16 @@
     const ms = visibleChat();
     if (!ms.length) { box.innerHTML = `<p class="muted small">Zatím ticho. Diplomacie začíná první zprávou.</p>`; return; }
     box.innerHTML = ms.map((m) => `<div class="msg${m.to !== 'ALL' ? ' priv' : ''}"><div class="mh">${m.from ? powerChip(m.from) : ''}<span class="who">${esc(m.from ? E.PNAME[m.from] : 'Systém')}</span>${m.to !== 'ALL' ? `<span class="to">→ ${esc(E.PNAME[m.to] || '')}</span>` : ''}<span class="grow"></span><span class="when">${esc(m.ph || '')}</span></div><div class="mt"></div></div>`).join('');
-    const nodes = box.querySelectorAll('.mt'); ms.forEach((m, i) => { nodes[i].textContent = m.text; });
+    const nodes = box.querySelectorAll('.mt');
+    ms.forEach((m, i) => {
+      if (!m.voice) { nodes[i].textContent = m.text; return; }
+      // stejný <audio> prvek se jen přesune, takže překreslení chatu nepřeruší přehrávání
+      let a = AUD.get(m.id);
+      if (!a) { a = document.createElement('audio'); a.controls = true; a.preload = 'metadata'; a.src = m.voice; AUD.set(m.id, a); }
+      nodes[i].classList.add('voice'); nodes[i].appendChild(a);
+      if (m.dur) { const d = document.createElement('span'); d.className = 'vdur'; d.textContent = '🎙 ' + fmtLeft(m.dur * 1000); nodes[i].appendChild(d); }
+      if (m.tr) { const t = document.createElement('div'); t.className = 'vtr'; t.textContent = '„' + m.tr + '“'; nodes[i].appendChild(t); }
+    });
     box.scrollTop = box.scrollHeight;
     S.chatSeen = ms.length; lsSet('velmoci-seen-' + S.gid, ms.length);
   }
@@ -1864,6 +1996,12 @@
     const what = g.state.type === 'M' ? 'jednání a rozkazy' : g.state.type === 'R' ? 'ústupy' : 'stavby';
     const host = g.createdBy === S.B.uid && phaseLimit(g) <= 3600e3;
     el.className = 'clock' + (g.paused != null ? ' paused' : tl < 120e3 ? ' hurry' : '');
+    const warnAt = Math.max(30e3, Math.min(phaseLimit(g) * 0.2, 3600e3)); const wk = g.id + E.phaseKey(g.state);
+    if (g.paused == null && tl > 0 && tl < warnAt && !NT.warned[wk]) {
+      const key = E.phaseKey(g.state);
+      const late = E.actingPowers(g.state).filter((p) => g.seats && g.seats[p] === S.B.uid && !(S.orders[p] && S.orders[p].key === key && S.orders[p].ready));
+      if (late.length) { NT.warned[wk] = 1; flash('Zbývá ' + fmtLeft(tl) + ' – odevzdej rozkazy.'); notify('Dochází čas: ' + fmtLeft(tl), (g.name || '') + ' · ' + E.phaseName(g.state), g.id); }
+    }
     el.innerHTML = `<span class="cl-l">${g.paused != null ? 'pauza' : tl <= 0 ? 'čas vypršel' : what}</span><span class="cl-t">${fmtLeft(Math.max(0, tl))}</span>${host ? `<button class="btn sm ghost cl-b" data-act="pause">${g.paused != null ? 'Pokračovat' : 'Pauza'}</button>` : ''}`;
     const b = el.querySelector('[data-act]'); if (b) b.addEventListener('click', onAct);
   }
@@ -1955,9 +2093,9 @@
   async function createGame(ev) {
     ev.preventDefault();
     const name = ($('#ng-name').value || '').trim() || 'Partie ' + new Date().toLocaleDateString('cs-CZ');
-    const mode = $('#ng-mode').value; const fill = $('#ng-fill').value; const tempo = $('#ng-dl').value; const need = +(($('#ng-need') || {}).value || 0);
+    const mode = $('#ng-mode').value; const fill = $('#ng-fill').value; const tempo = $('#ng-dl').value; const need = +(($('#ng-need') || {}).value || 0); const afk = ($('#ng-afk') || {}).value || 'bot';
     const seats = {}; for (const p of PW) seats[p] = '';
-    const data = { name, created: Date.now(), createdBy: S.B.uid, status: 'lobby', players: { [S.B.uid]: Date.now() }, need, fill, seats, bots: {}, ai: {}, tempo, deadline: 0, paused: null, phaseAt: 0, seq: 0, state: E.initialState() };
+    const data = { name, created: Date.now(), createdBy: S.B.uid, status: 'lobby', players: { [S.B.uid]: Date.now() }, need, fill, afk, seats, bots: {}, ai: {}, tempo, deadline: 0, paused: null, phaseAt: 0, seq: 0, state: E.initialState() };
     if (mode === 'now') { Object.assign(data, drawPowers(data), { status: 'play', phaseAt: Date.now(), drawAt: Date.now() }); }
     try { const id = await S.B.create(data); if (fill === 'ai') lsSet('velmoci-aihost-' + id, true); openGame(id); } catch (e) { flash('Hru se nepodařilo založit. Máš k této stránce právo zápisu?'); }
   }
@@ -2078,6 +2216,10 @@
       case 'tutorial': S.menu = false; S.gmenu = false; S.rulesModal = false; S.modal = null; openTutorial(0); break;
       case 'menu': S.menu = !S.menu; render(); break;
       case 'music': musToggle(); if (S.gmenu) render(); break;
+      case 'notify': await ntToggle(); break;
+      case 'rec': await recStart(); break;
+      case 'rec-stop': recStop(false); break;
+      case 'rec-cancel': recStop(true); break;
       case 'gmenu': S.gmenu = !S.gmenu; render(); break;
       case 'g-rules': S.gmenu = false; S.rulesModal = true; render(); break;
       case 'rules-off': if (ev.target.closest('[data-stop]') && !ev.target.closest('.btn')) break; S.rulesModal = false; render(); break;

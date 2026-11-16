@@ -733,11 +733,33 @@
     for (const d of res.dislodged) if (d.o === pw) s -= d.opts.length ? 6 : 10;
     return s;
   }
-  function botMovementV2(st, pw) {
+  // Konvoje pro bota: vlastní armáda na pobřeží + řetěz 1–2 vlastních loďstev na moři
+  function convoyOptions(st, pw) {
+    const mine = st.units.filter((u) => u.o === pw);
+    const fset = new Set(mine.filter((u) => u.t === 'F' && isSea(u.p)).map((u) => u.p));
+    const out = []; const seen = new Set();
+    if (!fset.size) return out;
+    for (const a of mine) {
+      if (a.t !== 'A' || !isCoastal(a.p)) continue;
+      const walk = new Set(armyNeighbors(a.p));
+      const prev = {}; const q = [];
+      for (const s of ADJ[a.p]) if (fset.has(s)) { prev[s] = null; q.push(s); }
+      while (q.length) {
+        const s = q.shift();
+        const chain = []; for (let x = s; x !== null; x = prev[x]) chain.push(x);
+        for (const n of ADJ[s]) {
+          if (fset.has(n)) { if (prev[n] === undefined && chain.length < 2) { prev[n] = s; q.push(n); } }
+          else if (isCoastal(n) && n !== a.p && !walk.has(n) && !seen.has(a.p + n)) { seen.add(a.p + n); out.push({ a: a.p, to: n, chain }); }
+        }
+      }
+    }
+    return out;
+  }
+  // v2: předpověď soupeřů = bot v1 + agresivní varianta; v3 navíc „chamtivý“ v2 soupeř a konvoje
+  function botMovementV2(st, pw, v3) {
     const R = rng(hashStr(phaseKey(st) + pw + 'v2'));
     const V = provValues(st, pw);
     const ctx = { V, D: { A: spread(st, pw, V, 'A'), F: spread(st, pw, V, 'F') } };
-    // předpověď soupeřů: jednoduchý bot + agresivní varianta (útoky na naše centra)
     const others = POWERS.filter((q) => q !== pw && unitCount(st, q) > 0);
     const base = [].concat(...others.map((q) => botMovementV1(st, q)));
     const aggr = base.map((o) => {
@@ -746,18 +768,26 @@
       if (tgt && R() < 0.6) { const cs = moveCoasts(u, tgt); return { p: o.p, k: 'M', to: tgt, tc: cs[0] || null }; }
       return o;
     });
+    const scen = [[base, 0.5], [aggr, 0.5]];
+    if (v3) {
+      const R0 = rng(1);
+      const greedy = [].concat(...others.map((q) => {
+        const Vq = provValues(st, q);
+        return genOrders(st, q, { V: Vq, D: { A: spread(st, q, Vq, 'A'), F: spread(st, q, Vq, 'F') } }, R0, 0);
+      }));
+      scen.length = 0; scen.push([base, 0.3], [greedy, 0.4], [aggr, 0.3]);
+    }
+    const evalSet = (mine) => { let s = 0; for (const [opp, w] of scen) s += scoreResult(st, pw, adjudicateMovement(st, mine.concat(opp)), ctx) * w; return s; };
     let best = null;
     const N = 14;
     for (let i = 0; i < N; i++) {
       const mine = genOrders(st, pw, ctx, R, i === 0 ? 0 : 1 + i * 0.5);
-      const s = scoreResult(st, pw, adjudicateMovement(st, mine.concat(base)), ctx) * 0.5
-        + scoreResult(st, pw, adjudicateMovement(st, mine.concat(aggr)), ctx) * 0.5;
+      const s = evalSet(mine);
       if (!best || s > best.s) best = { s, mine };
     }
     // lokální vylepšení: zkusit u každé jednotky jiný rozkaz (drž, tah, podpora) a nechat lepší
-    const evalSet = (mine) => scoreResult(st, pw, adjudicateMovement(st, mine.concat(base)), ctx) * 0.5
-      + scoreResult(st, pw, adjudicateMovement(st, mine.concat(aggr)), ctx) * 0.5;
     let cur = best.mine, curS = best.s;
+    const convoys = v3 ? convoyOptions(st, pw) : [];
     for (let pass = 0; pass < 2; pass++) {
       let improved = false;
       for (let i = 0; i < cur.length; i++) {
@@ -767,13 +797,23 @@
         for (const o of cur) {
           if (o.p === u.p) continue;
           if (o.k === 'M' && o.to !== u.p && canReach(u, o.to)) alts.push({ p: u.p, k: 'S', sp: o.p, st: o.to });
-          else if (o.k !== 'M' && canReach(u, o.p)) alts.push({ p: u.p, k: 'S', sp: o.p, st: null });
+          else if (o.k !== 'M' && o.k !== 'C' && canReach(u, o.p)) alts.push({ p: u.p, k: 'S', sp: o.p, st: null });
         }
         for (const a of alts) {
           const trial = cur.slice(); trial[i] = a;
           const sc = evalSet(trial);
           if (sc > curS + 0.01) { cur = trial; curS = sc; improved = true; }
         }
+      }
+      // konvoje: armáda + celý řetěz loďstev najednou
+      for (const c of convoys) {
+        const trial = cur.map((o) => {
+          if (o.p === c.a) return { p: c.a, k: 'M', to: c.to, tc: null, vc: true };
+          if (c.chain.includes(o.p)) return { p: o.p, k: 'C', sp: c.a, st: c.to };
+          return o;
+        });
+        const sc = evalSet(trial);
+        if (sc > curS + 0.01) { cur = trial; curS = sc; improved = true; }
       }
       if (!improved) break;
     }
@@ -820,10 +860,10 @@
     mine.sort((a, b) => a.s - b.s);
     return mine.slice(0, -n).map((x) => ({ k: 'X', p: x.u.p }));
   }
-  let BOT_LEVEL = 2;
+  let BOT_LEVEL = 3;
   function botOrders(st, pw, level) {
-    const v2 = (level || BOT_LEVEL) >= 2;
-    if (st.type === 'M') return v2 ? botMovementV2(st, pw) : botMovementV1(st, pw);
+    const lv = level || BOT_LEVEL, v2 = lv >= 2;
+    if (st.type === 'M') return v2 ? botMovementV2(st, pw, lv >= 3) : botMovementV1(st, pw);
     if (st.type === 'R') return v2 ? botRetreatsV2(st, pw) : botRetreats(st, pw);
     if (st.type === 'A') return v2 ? botAdjustV2(st, pw) : botAdjust(st, pw);
     return [];

@@ -17,10 +17,12 @@
 - Web načítá skripty přes `js/gate.js` (heslo, pak Firebase SDK + fb.js + hra).
 - Kódy provincií jsou anglické zkratky (VIE, BUD…), texty v UI česky. Pobřeží: NC/SC/EC → česky SP/JP/VP.
 - Jednotky: A = armáda, F = loďstvo (v UI „L“).
+- Hlasové vzkazy: zpráva v `chat` má navíc `voice` (data URL, Opus ~24 kb/s, max 60 s), `dur`, `tr` (přepis přes Web Speech API, když ho prohlížeč umí); `text` obsahuje popisek + přepis, aby ho četli AI diplomaté.
+- Upozornění (`NT` v app.js): zvuk + blikající záložka + systémové oznámení, když jsem na tahu (i v jiné otevřené hře), když dochází čas a nemám odevzdáno, a na soukromou zprávu. Volba hry `afk`: `bot` (výchozí) = po vypršení limitu dá chybějící rozkazy bot, `hold` = jednotky drží.
 
 ## Jak pracovat
 - Dělej cílené úpravy jen v dotčeném souboru, nepřepisuj celé soubory.
-- Boti: `botOrders(st, pw, level)` v engine.js – v2 (výchozí): hodnoty provincií + 14 variant tahů ověřených rozhodčím proti předpovědi soupeřů + lokální vylepšování; v1 = původní jednoduchý bot (soupeř pro testy). Sílu měř `node tools/bench.js 10 1912` (průměr center v2 vs v1, poslední měření 6,9 vs 4,8).
+- Boti: `botOrders(st, pw, level)` v engine.js – v3 (výchozí) = v2 + konvoje + třetí scénář soupeřů („chamtivý“ v2); v2: hodnoty provincií + 14 variant tahů ověřených rozhodčím proti předpovědi soupeřů + lokální vylepšování; v1 = původní jednoduchý bot. Sílu měř `node tools/bench.js N ROK úrovně pole`, např. `node tools/bench.js 8 1910 2,3 2` (průměr center hrdiny mezi boty v2: v3 5,30 vs v2 4,86; proti poli v1: v2 6,6, v3 6,6). Zkoušený „hlavní nepřítel“ (fokus na jednoho souseda) výsledky zhoršil.
 - Test enginu: `node -e 'global.window=globalThis;require("./js/data.js");require("./js/engine.js");…'`
 - Lokální náhled: `python3 -m http.server` a otevřít `http://localhost:8000/` (`#mapa` = průzkumník mapy, `#tutorial`).
 - Komunikace s Danielem česky, stručně.
