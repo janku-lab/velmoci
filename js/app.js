@@ -1881,7 +1881,7 @@
         <div class="seatfoot">
           ${seated ? (creator ? '' : `<button class="btn" data-act="leave">Odejít od stolu</button>`) : `<button class="btn primary" data-act="join" ${S.canWrite && players.length < 7 ? '' : 'disabled'}>Přisednout ke stolu</button>`}
           ${creator ? `<button class="btn primary big" data-act="start" ${players.length ? '' : 'disabled'}>Zamíchat a losovat země</button>
-            <label class="inl" for="fill-sel">Volná místa:</label><select id="fill-sel" class="inlsel"><option value="ai"${g.fill !== 'bot' ? ' selected' : ''}>AI diplomaté</option><option value="bot"${g.fill === 'bot' ? ' selected' : ''}>jednoduší boti</option></select>
+            <label class="inl" for="fill-sel">Volná místa:</label><select id="fill-sel" class="inlsel"><option value="ai"${g.fill !== 'bot' ? ' selected' : ''}${S.B.kind !== 'db' ? ' disabled' : ''}>AI diplomaté${S.B.kind !== 'db' ? ' (jen v Claude)' : ''}</option><option value="bot"${g.fill === 'bot' ? ' selected' : ''}>jednoduší boti</option></select>
             <label class="inl" for="tempo-sel">Čas:</label><select id="tempo-sel" class="inlsel">${Object.entries(TEMPO).map(([k, t]) => `<option value="${k}"${(g.tempo || 'none') === k ? ' selected' : ''}>${esc(t.l)}</option>`).join('')}</select>
             <button class="btn sm ghost" data-act="delgame">Smazat hru</button>` : `<span class="muted">Losovat bude zakladatel hry. Čas: ${esc(TEMPO[g.tempo || 'none'].l)}.</span>`}
         </div>
