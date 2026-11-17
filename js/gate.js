@@ -19,6 +19,16 @@
     })();
   }
 
+  // úvodní video začít stahovat hned (souběžně se skripty hry); app.js si ho převezme jako window.VHERO
+  try {
+    if (!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) && !(navigator.connection && navigator.connection.saveData)) {
+      var hv = document.createElement('video');
+      hv.muted = true; hv.playsInline = true; hv.setAttribute('muted', ''); hv.setAttribute('playsinline', '');
+      hv.preload = 'auto'; hv.src = 'hero.mp4'; hv.load();
+      window.VHERO = hv;
+    }
+  } catch (e) { /* ignore */ }
+
   function unlocked() { try { return localStorage.getItem(KEY) === HASH; } catch (e) { return false; } }
 
   async function sha256(t) {

@@ -1506,7 +1506,8 @@
     const nm = $('#ng-name', root); if (nm) nm.focus();
   }
   // úvodní video: dvě kopie hero.mp4, konec jedné se za 0,25 s prolne do začátku druhé (nekonečná smyčka bez skoku).
-  // Než se video načte, je vidět jeho první snímek (hero-v0.jpg). Prvek se při překreslení lobby jen přesune, aby se přehrávání nerestartovalo.
+  // První kopii začne stahovat už gate.js (window.VHERO). Bez náhledového snímku: z tmy se rovnou prolne běžící video.
+  // Prvek se při překreslení lobby jen přesune, aby se přehrávání nerestartovalo.
   let HV = null;
   function heroVideo(root) {
     const slot = $('.herov-slot', root); if (!slot) return;
@@ -1515,24 +1516,29 @@
       const XF = 0.25; // délka prolnutí v sekundách (musí sedět s CSS transition)
       HV = document.createElement('div'); HV.className = 'herov-wrap';
       HV.setAttribute('role', 'img'); HV.setAttribute('aria-label', 'Vojáci jdou po dřevěném chodníku mezi rozstřílenými stromy u Ypres, 1917');
-      const vids = (still ? [0] : [0, 1]).map((i) => {
-        const v = document.createElement('video');
-        v.className = 'herov' + (i ? '' : ' on'); v.muted = true; v.playsInline = true; v.preload = still ? 'none' : 'auto'; v.poster = 'hero-v0.jpg';
-        v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.src = 'hero.mp4';
+      const mk = (i) => {
+        const v = (i === 0 && window.VHERO) || document.createElement('video');
+        v.className = 'herov'; v.muted = true; v.playsInline = true; v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+        if (still) { v.preload = 'none'; v.poster = 'hero-v0.jpg'; v.classList.add('on'); }
+        else v.preload = 'auto';
+        if (!v.getAttribute('src')) v.src = 'hero.mp4';
         HV.appendChild(v); return v;
-      });
+      };
+      const vids = (still ? [0] : [0, 1]).map(mk);
       if (!still) {
         let cur = 0, started = false;
-        const start = (i) => { const v = vids[i]; v.currentTime = 0; const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); v.classList.add('on'); cur = i; };
-        vids[0].addEventListener('canplay', () => { if (!started) { started = true; start(0); } });
+        const start = (i) => { const v = vids[i]; v.currentTime = 0; const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); cur = i; };
         vids.forEach((v, i) => {
+          v.addEventListener('playing', () => { if (i === cur) v.classList.add('on'); });
           v.addEventListener('timeupdate', () => {
             if (i !== cur || !v.duration || v.duration - v.currentTime > XF) return;
-            start(1 - i); v.classList.remove('on'); // tahle dohrává a mizí, druhá jede od začátku
+            start(1 - i); vids[1 - i].classList.add('on'); v.classList.remove('on'); // tahle dohrává a mizí, druhá jede od začátku
           });
           // timeupdate chodí jen ~4× za sekundu, takže krátké prolnutí může minout – pak přepnout aspoň na konci
-          v.addEventListener('ended', () => { if (i === cur) { start(1 - i); v.classList.remove('on'); } else v.pause(); });
+          v.addEventListener('ended', () => { if (i === cur) { start(1 - i); vids[1 - i].classList.add('on'); v.classList.remove('on'); } else v.pause(); });
         });
+        const go = () => { if (!started) { started = true; start(0); } };
+        if (vids[0].readyState >= 3) go(); else vids[0].addEventListener('canplay', go);
         document.addEventListener('visibilitychange', () => {
           if (document.hidden) vids.forEach((v) => v.pause());
           else if (started && HV.isConnected) vids[cur].play().catch(() => {});
