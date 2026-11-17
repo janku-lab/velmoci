@@ -1481,7 +1481,7 @@
       </div>`;
     root.innerHTML = `
       <section class="herob">
-        <img src="hero.jpg" alt="Vojáci na dřevěném chodníku mezi rozstřílenými stromy v Chateau Wood u Ypres, 1917" width="1600" height="920"><span class="herov-slot"></span>
+<span class="herov-slot"></span>
         <div class="herok">Velmoci <span>1901</span></div>
         <div class="herot"><h1>Diplomacie. Zrada. Válka.</h1><p>Roku 1901 je Evropa na vrcholu moci, ale pod povrchem to vře: Trojspolek Německa, Rakouska-Uherska a Itálie stojí proti spojenectví Francie a Ruska a Británie ze svých ostrovů střeží rovnováhu sil. Loděnice spouštějí na vodu nové bitevní lodě, na Balkáně to doutná a diplomaté v salonech slibují mír, kterému nikdo nevěří.</p>
           ${myOpen.length > 1 ? `<ul class="mygames">${myOpen.slice(0, 5).map((g) => `<li><a href="#hra-${esc(g.id)}"><span class="mgn">${esc(g.name || 'hra')}</span><span class="mgp">${esc(g.status === 'lobby' ? 'u stolu' : g.state ? E.phaseName(g.state) : '')}</span>${myTurn(g) ? '<span class="mgt">na tahu</span>' : ''}</a></li>`).join('')}</ul>` : ''}
@@ -1505,42 +1505,43 @@
     bind(root);
     const nm = $('#ng-name', root); if (nm) nm.focus();
   }
-  // oživená úvodní fotka: dvě kopie videa, konec jedné se prolíná do začátku druhé (nekonečná smyčka bez skoku).
-  // Fotka je vidět jen na začátku, než se video načte. Prvek se při překreslení lobby jen přesune, aby se přehrávání nerestartovalo.
+  // úvodní video: dvě kopie hero.mp4, konec jedné se za 0,25 s prolne do začátku druhé (nekonečná smyčka bez skoku).
+  // Než se video načte, je vidět jeho první snímek (hero-v0.jpg). Prvek se při překreslení lobby jen přesune, aby se přehrávání nerestartovalo.
   let HV = null;
   function heroVideo(root) {
     const slot = $('.herov-slot', root); if (!slot) return;
-    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const save = navigator.connection && navigator.connection.saveData;
-    if (reduce || save) return;
     if (!HV) {
+      const still = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) || (navigator.connection && navigator.connection.saveData);
       const XF = 0.25; // délka prolnutí v sekundách (musí sedět s CSS transition)
-      HV = document.createElement('div'); HV.className = 'herov-wrap'; HV.setAttribute('aria-hidden', 'true');
-      const vids = [0, 1].map(() => {
+      HV = document.createElement('div'); HV.className = 'herov-wrap';
+      HV.setAttribute('role', 'img'); HV.setAttribute('aria-label', 'Vojáci jdou po dřevěném chodníku mezi rozstřílenými stromy u Ypres, 1917');
+      const vids = (still ? [0] : [0, 1]).map((i) => {
         const v = document.createElement('video');
-        v.className = 'herov'; v.muted = true; v.playsInline = true; v.preload = 'auto';
+        v.className = 'herov' + (i ? '' : ' on'); v.muted = true; v.playsInline = true; v.preload = still ? 'none' : 'auto'; v.poster = 'hero-v0.jpg';
         v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.src = 'hero.mp4';
         HV.appendChild(v); return v;
       });
-      let cur = 0, started = false;
-      const start = (i) => { const v = vids[i]; v.currentTime = 0; const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); v.classList.add('on'); cur = i; };
-      vids[0].addEventListener('canplaythrough', () => { if (!started) { started = true; start(0); } });
-      vids.forEach((v, i) => {
-        v.addEventListener('timeupdate', () => {
-          if (i !== cur || !v.duration || v.duration - v.currentTime > XF) return;
-          start(1 - i); v.classList.remove('on'); // tahle dohrává a mizí, druhá jede od začátku
+      if (!still) {
+        let cur = 0, started = false;
+        const start = (i) => { const v = vids[i]; v.currentTime = 0; const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); v.classList.add('on'); cur = i; };
+        vids[0].addEventListener('canplay', () => { if (!started) { started = true; start(0); } });
+        vids.forEach((v, i) => {
+          v.addEventListener('timeupdate', () => {
+            if (i !== cur || !v.duration || v.duration - v.currentTime > XF) return;
+            start(1 - i); v.classList.remove('on'); // tahle dohrává a mizí, druhá jede od začátku
+          });
+          // timeupdate chodí jen ~4× za sekundu, takže krátké prolnutí může minout – pak přepnout aspoň na konci
+          v.addEventListener('ended', () => { if (i === cur) { start(1 - i); v.classList.remove('on'); } else v.pause(); });
         });
-        // timeupdate chodí jen ~4× za sekundu, takže krátké prolnutí může minout – pak přepnout aspoň na konci
-        v.addEventListener('ended', () => { if (i === cur) { start(1 - i); v.classList.remove('on'); } else v.pause(); });
-      });
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) vids.forEach((v) => v.pause());
-        else if (started && HV.isConnected) { const v = vids[cur]; v.play().catch(() => {}); }
-      });
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) vids.forEach((v) => v.pause());
+          else if (started && HV.isConnected) vids[cur].play().catch(() => {});
+        });
+        HV.resume = () => { if (started && vids[cur].paused) vids[cur].play().catch(() => {}); };
+      }
     }
     slot.replaceWith(HV);
-    if (HV.dataset.seen) { const v = HV.querySelector('video.on'); if (v && v.paused) v.play().catch(() => {}); }
-    HV.dataset.seen = '1';
+    if (HV.resume) HV.resume();
   }
   function rulesCard() {
     return `<details class="card rules"><summary>Jak se ovládá mapa</summary>
