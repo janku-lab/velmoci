@@ -293,7 +293,7 @@
   // ------------------------------------------------------------------ AI diplomats
   let SAMPLE = null;
   let DICT = null, DICT_WIRED = false; // Claude artefakt: diktování (mikrofon pro nahrávání tam stránka nemá)
-  const AI_URL = 'https://claude.ai/artifact/PSpTcC2rdCUybXMf2FfpXY'; // verze v Claude: online hra + AI diplomaté
+  const AI_URL = 'https://claude.ai/artifact/L6vCTBiBtAUewK1d5TQ8s5'; // verze v Claude: online hra + AI diplomaté
   const AIQ = { running: 0, queue: [], tried: new Set() };
   const aiHosting = () => !!(SAMPLE && S.gid && lsGet('velmoci-aihost-' + S.gid, false) && !S.aiOff);
   function aiHostBox(g) {
