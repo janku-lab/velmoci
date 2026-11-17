@@ -1514,7 +1514,7 @@
     const save = navigator.connection && navigator.connection.saveData;
     if (reduce || save) return;
     if (!HV) {
-      const XF = 2.2; // délka prolnutí v sekundách (musí sedět s CSS transition)
+      const XF = 0.25; // délka prolnutí v sekundách (musí sedět s CSS transition)
       HV = document.createElement('div'); HV.className = 'herov-wrap'; HV.setAttribute('aria-hidden', 'true');
       const vids = [0, 1].map(() => {
         const v = document.createElement('video');
@@ -1530,7 +1530,8 @@
           if (i !== cur || !v.duration || v.duration - v.currentTime > XF) return;
           start(1 - i); v.classList.remove('on'); // tahle dohrává a mizí, druhá jede od začátku
         });
-        v.addEventListener('ended', () => { if (i !== cur) v.pause(); });
+        // timeupdate chodí jen ~4× za sekundu, takže krátké prolnutí může minout – pak přepnout aspoň na konci
+        v.addEventListener('ended', () => { if (i === cur) { start(1 - i); v.classList.remove('on'); } else v.pause(); });
       });
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) vids.forEach((v) => v.pause());
