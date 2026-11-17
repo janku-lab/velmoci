@@ -1481,7 +1481,7 @@
       </div>`;
     root.innerHTML = `
       <section class="herob">
-        <img src="hero.jpg" alt="Vojáci na dřevěném chodníku mezi rozstřílenými stromy v Chateau Wood u Ypres, 1917" width="1600" height="920">
+        <img src="hero.jpg" alt="Vojáci na dřevěném chodníku mezi rozstřílenými stromy v Chateau Wood u Ypres, 1917" width="1600" height="920"><span class="herov-slot"></span>
         <div class="herok">Velmoci <span>1901</span></div>
         <div class="herot"><h1>Diplomacie. Zrada. Válka.</h1><p>Roku 1901 je Evropa na vrcholu moci, ale pod povrchem to vře: Trojspolek Německa, Rakouska-Uherska a Itálie stojí proti spojenectví Francie a Ruska a Británie ze svých ostrovů střeží rovnováhu sil. Loděnice spouštějí na vodu nové bitevní lodě, na Balkáně to doutná a diplomaté v salonech slibují mír, kterému nikdo nevěří.</p>
           ${myOpen.length > 1 ? `<ul class="mygames">${myOpen.slice(0, 5).map((g) => `<li><a href="#hra-${esc(g.id)}"><span class="mgn">${esc(g.name || 'hra')}</span><span class="mgp">${esc(g.status === 'lobby' ? 'u stolu' : g.state ? E.phaseName(g.state) : '')}</span>${myTurn(g) ? '<span class="mgt">na tahu</span>' : ''}</a></li>`).join('')}</ul>` : ''}
@@ -1501,8 +1501,31 @@
         </nav>
       </section>
       ${modal ? `<div class="mlay" data-act="modal-bg">${modal}</div>` : ''}${keysModal()}`;
+    heroVideo(root);
     bind(root);
     const nm = $('#ng-name', root); if (nm) nm.focus();
+  }
+  // oživená úvodní fotka: video přehraje průchod vojáků, prolne se zpět do fotky, chvíli počká a jede znovu.
+  // Jeden <video> prvek se při překreslení lobby jen přesune, aby se přehrávání nerestartovalo.
+  let HV = null;
+  function heroVideo(root) {
+    const slot = $('.herov-slot', root); if (!slot) return;
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const save = navigator.connection && navigator.connection.saveData;
+    if (reduce || save) return;
+    if (!HV) {
+      const v = HV = document.createElement('video');
+      v.className = 'herov'; v.muted = true; v.playsInline = true; v.preload = 'auto'; v.setAttribute('aria-hidden', 'true');
+      v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+      v.src = 'hero.mp4';
+      let timer = null;
+      const play = () => { clearTimeout(timer); if (!v.isConnected) { timer = setTimeout(play, 5000); return; } v.currentTime = 0; const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); v.classList.add('on'); };
+      v.addEventListener('canplaythrough', () => { if (!v.dataset.started) { v.dataset.started = '1'; timer = setTimeout(play, 1200); } });
+      v.addEventListener('timeupdate', () => { if (v.duration && v.duration - v.currentTime < 1.3) v.classList.remove('on'); });
+      v.addEventListener('ended', () => { v.classList.remove('on'); timer = setTimeout(play, 5000); });
+      document.addEventListener('visibilitychange', () => { if (document.hidden) v.pause(); else if (v.classList.contains('on') && v.isConnected) v.play().catch(() => {}); });
+    }
+    slot.replaceWith(HV);
   }
   function rulesCard() {
     return `<details class="card rules"><summary>Jak se ovládá mapa</summary>
