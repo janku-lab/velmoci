@@ -161,7 +161,7 @@
   async function boot() {
     render();
     let db = null, user = null;
-    try { if (window.claude && window.claude.use) { [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]); window.claude.use('sample').then((x) => { SAMPLE = x; render(); aiTick(); }).catch(() => {}); } } catch (e) { /* ignore */ }
+    try { if (window.claude && window.claude.use) { [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]); window.claude.use('sample').then((x) => { SAMPLE = x; render(); aiTick(); }).catch(() => {}); window.claude.use('dictation').then((d) => { DICT = d; if (d) render(); }).catch(() => {}); } } catch (e) { /* ignore */ }
     let uid = null;
     if (user) { try { uid = await user.id(); } catch (e) { uid = null; } }
     if (db && uid) {
@@ -292,6 +292,7 @@
 
   // ------------------------------------------------------------------ AI diplomats
   let SAMPLE = null;
+  let DICT = null, DICT_WIRED = false; // Claude artefakt: diktování (mikrofon pro nahrávání tam stránka nemá)
   const AI_URL = 'https://claude.ai/artifact/PSpTcC2rdCUybXMf2FfpXY'; // verze v Claude: online hra + AI diplomaté
   const AIQ = { running: 0, queue: [], tried: new Set() };
   const aiHosting = () => !!(SAMPLE && S.gid && lsGet('velmoci-aihost-' + S.gid, false) && !S.aiOff);
@@ -1944,7 +1945,7 @@
     return `<div class="chat"><div class="msgs" id="msgs"></div>
       ${mine.length ? `<form id="chatf" class="chatf"><select id="chat-to" aria-label="Komu">${opts.map(([v, l]) => `<option value="${v}"${S.chatTo === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
       <div class="chrow">${S.rec ? `<span class="recbar"><span class="recdot" aria-hidden="true"></span>Nahrávám <b id="rec-t">0:00</b><span class="muted small">max 1 min</span></span><button type="button" class="btn" data-act="rec-cancel">Zrušit</button><button type="button" class="btn primary" data-act="rec-stop">Odeslat</button>`
-        : `<input id="chat-in" maxlength="500" placeholder="Navrhni spojenectví…" autocomplete="off"><button type="button" class="btn mic" data-act="rec" title="Nahrát hlasový vzkaz (max 1 min)" aria-label="Nahrát hlasový vzkaz"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg></button><button class="btn primary" type="submit">Poslat</button>`}</div></form>` : '<p class="muted small">Psát můžou jen hráči.</p>'}
+        : `<input id="chat-in" maxlength="500" placeholder="Navrhni spojenectví…" autocomplete="off">${S.B.kind === 'db' ? (DICT ? `<button type="button" class="btn mic${S.dict ? ' on' : ''}" data-dict="1" title="Diktovat zprávu" aria-label="Diktovat zprávu"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg></button>` : '') : `<button type="button" class="btn mic" data-act="rec" title="Nahrát hlasový vzkaz (max 1 min)" aria-label="Nahrát hlasový vzkaz"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg></button>`}<button class="btn primary" type="submit">Poslat</button>`}</div></form>` : '<p class="muted small">Psát můžou jen hráči.</p>'}
       <p class="muted small">Soukromé zprávy vidí jen adresát. AI diplomaté odpovídají a sami píšou, ale jejich slovo nic neznamená. Jednoduší boti nevyjednávají.</p>${aiHostBox(g)}</div>`;
   }
   // ---------- hlasové vzkazy: MediaRecorder (Opus ~24 kb/s) → data URL přímo ve zprávě chatu; přepis řeči, kde to prohlížeč umí
@@ -1999,6 +2000,23 @@
     const label = '🎙 hlasový vzkaz (' + fmtLeft(dur * 1000) + ')';
     try { await S.B.addSub(R.gid, 'chat', { from: R.from, to: R.to, text: R.text ? label + ': ' + R.text : label, voice: url, dur, tr: R.text || '', t: Date.now(), uid: S.B.uid, ph: E.phaseName(g.state).split(' · ')[0] }); }
     catch (e) { flash('Hlasový vzkaz se nepodařilo odeslat.'); }
+  }
+  // diktování v Claude artefaktu: text se připisuje do pole zprávy, odeslání je na hráči
+  function dictToggle() {
+    const d = DICT; if (!d) return;
+    if (S.dict) { d.stop().catch(() => {}); return; }
+    const p = d.start(); // musí jít přímo z kliknutí
+    if (!DICT_WIRED) {
+      DICT_WIRED = true;
+      d.onFinal(({ text }) => { const i = $('#chat-in'); if (i && text) { i.value = (i.value ? i.value.replace(/\s+$/, '') + ' ' : '') + text.trim(); } });
+      d.onPartial(({ text }) => { const i = $('#chat-in'); if (i) i.placeholder = text || 'Mluv…'; });
+      d.onState(({ state }) => {
+        S.dict = state === 'listening';
+        const b = $('[data-dict]'); if (b) b.classList.toggle('on', S.dict);
+        const i = $('#chat-in'); if (i) { i.placeholder = S.dict ? 'Mluv…' : 'Navrhni spojenectví…'; if (!S.dict) i.focus(); }
+      });
+    }
+    if (p && p.catch) p.catch((e) => { if (/not_granted/.test(String((e && (e.code || e.message)) || e))) flash('Bez povolení mikrofonu diktovat nejde, piš.'); });
   }
   function visibleChat() {
     const g = S.game; if (!g) return [];
@@ -2130,6 +2148,7 @@
     const svg = $('#mapsvg', root); if (svg) svg.addEventListener('click', onMapClick);
     const mw = $('#mapwrap', root); if (mw) bindPan(mw);
     const cf = $('#chatf', root); if (cf) cf.addEventListener('submit', sendChat);
+    root.querySelectorAll('[data-dict]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); dictToggle(); }));
     const tg = $('#tempo-game', root);
     if (tg) tg.addEventListener('change', () => { const g = S.game; const patch = { tempo: tg.value }; if (g.paused != null) patch.paused = null; S.B.updateGame(S.gid, patch).then(() => flash('Čas na kolo: ' + (TEMPO[tg.value].s || TEMPO[tg.value].l))).catch(() => flash('Nepovedlo se změnit tempo.')); });
     const ct = $('#chat-to', root); if (ct) ct.addEventListener('change', () => { S.chatTo = ct.value; });
