@@ -1899,7 +1899,7 @@
     return `<table class="ov"><thead><tr><th>Velmoc</th><th>Hráč</th><th class="n">Centra</th><th class="n">Jedn.</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${powerChip(r.p)} ${esc(E.PNAME[r.p])}</td><td>${g.seats && g.seats[r.p] ? esc(nameOf(g.seats[r.p])) : isAI(g, r.p) ? `<span class="muted" title="${esc(g.ai[r.p].persona || '')}">AI diplomat</span>` : '<span class="muted">bot</span>'}</td><td class="n">${r.c}</td><td class="n">${r.u}</td></tr><tr class="barrow"><td colspan="4"><span class="bar pw-${r.p}" style="width:${(r.c / 18 * 100).toFixed(1)}%"></span></td></tr>`).join('')}</tbody></table>
       <p class="muted small">Pruh ukazuje cestu k vítězství: 18 center z 34.</p>
       <h4>Centra</h4><div class="sclist">${E.SC.slice().sort().map((p) => `<span class="sc ${st.sc && st.sc[p] ? 'pw-' + st.sc[p] : 'neutral'}" title="${esc(NAMES[p])}">${p}</span>`).join('')}</div>
-      ${phaseLimit(g) ? `<p class="muted small">Časový limit: ${esc(g.tempo ? TEMPO[g.tempo].l : g.deadline + ' h na kolo')}. Po uplynutí se kolo vyhodnotí; kdo nestihl, jeho jednotky drží.</p>` : ''}
+      ${phaseLimit(g) ? `<p class="muted small">Časový limit: ${esc(g.tempo ? TEMPO[g.tempo].l : g.deadline + ' h na kolo')}. Po uplynutí se kolo vyhodnotí; ${g.afk === 'hold' ? 'kdo nestihl, jeho jednotky drží' : 'kdo nestihl, za toho chybějící rozkazy dá bot'}.</p>` : ''}
       ${g.createdBy === S.B.uid ? `<details class="danger"><summary>Správa hry</summary><button class="btn sm" data-act="delgame">Smazat hru</button></details>` : ''}`;
   }
 
