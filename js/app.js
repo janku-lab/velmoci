@@ -1505,8 +1505,8 @@
     bind(root);
     const nm = $('#ng-name', root); if (nm) nm.focus();
   }
-  // oživená úvodní fotka: video přehraje průchod vojáků, prolne se zpět do fotky, chvíli počká a jede znovu.
-  // Jeden <video> prvek se při překreslení lobby jen přesune, aby se přehrávání nerestartovalo.
+  // oživená úvodní fotka: dvě kopie videa, konec jedné se prolíná do začátku druhé (nekonečná smyčka bez skoku).
+  // Fotka je vidět jen na začátku, než se video načte. Prvek se při překreslení lobby jen přesune, aby se přehrávání nerestartovalo.
   let HV = null;
   function heroVideo(root) {
     const slot = $('.herov-slot', root); if (!slot) return;
@@ -1514,18 +1514,32 @@
     const save = navigator.connection && navigator.connection.saveData;
     if (reduce || save) return;
     if (!HV) {
-      const v = HV = document.createElement('video');
-      v.className = 'herov'; v.muted = true; v.playsInline = true; v.preload = 'auto'; v.setAttribute('aria-hidden', 'true');
-      v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
-      v.src = 'hero.mp4';
-      let timer = null;
-      const play = () => { clearTimeout(timer); if (!v.isConnected) { timer = setTimeout(play, 5000); return; } v.currentTime = 0; const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); v.classList.add('on'); };
-      v.addEventListener('canplaythrough', () => { if (!v.dataset.started) { v.dataset.started = '1'; timer = setTimeout(play, 1200); } });
-      v.addEventListener('timeupdate', () => { if (v.duration && v.duration - v.currentTime < 1.3) v.classList.remove('on'); });
-      v.addEventListener('ended', () => { v.classList.remove('on'); timer = setTimeout(play, 5000); });
-      document.addEventListener('visibilitychange', () => { if (document.hidden) v.pause(); else if (v.classList.contains('on') && v.isConnected) v.play().catch(() => {}); });
+      const XF = 2.2; // délka prolnutí v sekundách (musí sedět s CSS transition)
+      HV = document.createElement('div'); HV.className = 'herov-wrap'; HV.setAttribute('aria-hidden', 'true');
+      const vids = [0, 1].map(() => {
+        const v = document.createElement('video');
+        v.className = 'herov'; v.muted = true; v.playsInline = true; v.preload = 'auto';
+        v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.src = 'hero.mp4';
+        HV.appendChild(v); return v;
+      });
+      let cur = 0, started = false;
+      const start = (i) => { const v = vids[i]; v.currentTime = 0; const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); v.classList.add('on'); cur = i; };
+      vids[0].addEventListener('canplaythrough', () => { if (!started) { started = true; start(0); } });
+      vids.forEach((v, i) => {
+        v.addEventListener('timeupdate', () => {
+          if (i !== cur || !v.duration || v.duration - v.currentTime > XF) return;
+          start(1 - i); v.classList.remove('on'); // tahle dohrává a mizí, druhá jede od začátku
+        });
+        v.addEventListener('ended', () => { if (i !== cur) v.pause(); });
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) vids.forEach((v) => v.pause());
+        else if (started && HV.isConnected) { const v = vids[cur]; v.play().catch(() => {}); }
+      });
     }
     slot.replaceWith(HV);
+    if (HV.dataset.seen) { const v = HV.querySelector('video.on'); if (v && v.paused) v.play().catch(() => {}); }
+    HV.dataset.seen = '1';
   }
   function rulesCard() {
     return `<details class="card rules"><summary>Jak se ovládá mapa</summary>
