@@ -27,3 +27,8 @@
 - Test enginu: `node -e 'global.window=globalThis;require("./js/data.js");require("./js/engine.js");…'`
 - Lokální náhled: `python3 -m http.server` a otevřít `http://localhost:8000/` (`#mapa` = průzkumník mapy, `#tutorial`).
 - Komunikace s Danielem česky, stručně.
+
+## Corin
+
+Projekt je součástí **Corinu**, centrálního mozku projektů Daniela Janků. Registr: https://github.com/janku-lab/corin (`projects.yaml`, záznam `velmoci`).
+Po významné změně (stav, kde běží, nasazení, integrace) aktualizuj tento záznam. Nápady na propojení s jinými projekty patří do `NAPADY.md` v repu corin.
